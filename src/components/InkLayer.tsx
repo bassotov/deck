@@ -19,6 +19,9 @@ import {
 
 const ERASER_RADIUS = 16
 
+/** The open text box, before it becomes a `TextEl`. */
+type TextDraft = { x: number; y: number; value: string }
+
 const ERASER_CURSOR =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ccircle cx='13' cy='13' r='10' fill='rgba(0,0,0,0.06)' stroke='%2317161A' stroke-width='1.4'/%3E%3C/svg%3E\") 13 13, auto"
 
@@ -162,7 +165,7 @@ export default function InkLayer({
 
   const [points, setPoints] = useState<number[][] | null>(null)
   const [dragTo, setDragTo] = useState<[number, number] | null>(null)
-  const [editing, setEditing] = useState<{ x: number; y: number; value: string } | null>(null)
+  const [editing, setEditingState] = useState<TextDraft | null>(null)
   const [drag, setDrag] = useState<{ id: string; dx: number; dy: number } | null>(null)
   const [sizing, setSizing] = useState<{ id: string; w: number; h: number } | null>(null)
   const dragFrom = useRef<[number, number]>([0, 0])
@@ -181,22 +184,34 @@ export default function InkLayer({
   /** Stage units -> CSS pixels, for sizing the live text input. */
   const pxPerUnit = () => (wrapRef.current?.clientWidth ?? STAGE_W) / STAGE_W
 
+  /**
+   * The open text box is mirrored into a ref so `commitText` can read the live
+   * value without working inside a setState updater — StrictMode invokes those
+   * twice, which committed the same text element twice.
+   */
+  const editingRef = useRef<TextDraft | null>(null)
+
+  const setEditing = useCallback((next: TextDraft | null) => {
+    editingRef.current = next
+    setEditingState(next)
+  }, [])
+
   const commitText = useCallback(() => {
-    setEditing((current) => {
-      if (current && current.value.trim()) {
-        onCommit({
-          id: uid(),
-          kind: 'text',
-          color,
-          size: TOOL_SIZE.text,
-          x: current.x,
-          y: current.y,
-          text: current.value.replace(/\s+$/, ''),
-        })
-      }
-      return null
+    const current = editingRef.current
+    // Cleared first: a pointerdown and the textarea's blur both fire for one
+    // click away, and only the first of them should write an element.
+    setEditing(null)
+    if (!current || !current.value.trim()) return
+    onCommit({
+      id: uid(),
+      kind: 'text',
+      color,
+      size: TOOL_SIZE.text,
+      x: current.x,
+      y: current.y,
+      text: current.value.replace(/\s+$/, ''),
     })
-  }, [color, onCommit])
+  }, [color, onCommit, setEditing])
 
   useEffect(() => {
     if (editing) inputRef.current?.focus()
@@ -489,7 +504,10 @@ export default function InkLayer({
         <textarea
           ref={inputRef}
           value={editing.value}
-          onChange={(e) => setEditing((c) => (c ? { ...c, value: e.target.value } : c))}
+          onChange={(e) => {
+            const c = editingRef.current
+            if (c) setEditing({ ...c, value: e.target.value })
+          }}
           onBlur={commitText}
           onKeyDown={(e) => {
             e.stopPropagation()

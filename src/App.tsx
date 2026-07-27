@@ -9,6 +9,12 @@ import type { InkEl, ShapeKind, Story, StoryInk, Tool } from './types'
 
 const HISTORY_LIMIT = 60
 
+/** A sticky toast stays until it is replaced — a save that failed has to be seen. */
+interface Toast {
+  text: string
+  sticky?: boolean
+}
+
 const TEMPLATE = (title: string) => `# ${title}
 
 The one line that says what this is about.
@@ -70,10 +76,36 @@ export default function App() {
   const [activeSlug, setActiveSlug] = useState<string | null>(initial.slug)
   const [index, setIndex] = useState(initial.index)
 
-  const [ink, setInk] = useState<StoryInk>({})
-  const [past, setPast] = useState<StoryInk[]>([])
-  const [future, setFuture] = useState<StoryInk[]>([])
+  const [ink, setInkState] = useState<StoryInk>({})
+  const [past, setPastState] = useState<StoryInk[]>([])
+  const [future, setFutureState] = useState<StoryInk[]>([])
   const [inkCounts, setInkCounts] = useState<Record<string, number>>({})
+
+  /**
+   * Ink and its two history stacks are mirrored into refs, and every write goes
+   * through the wrappers below. An edit reads the current value from the ref and
+   * then fires plain setters: computing inside a setState updater meant
+   * StrictMode's double-invoke pushed each snapshot onto `past` twice and made
+   * one undo walk back two steps.
+   */
+  const inkRef = useRef(ink)
+  const pastRef = useRef(past)
+  const futureRef = useRef(future)
+
+  const setInk = useCallback((next: StoryInk) => {
+    inkRef.current = next
+    setInkState(next)
+  }, [])
+
+  const setPast = useCallback((next: StoryInk[]) => {
+    pastRef.current = next
+    setPastState(next)
+  }, [])
+
+  const setFuture = useCallback((next: StoryInk[]) => {
+    futureRef.current = next
+    setFutureState(next)
+  }, [])
 
   const [tool, setTool] = useState<Tool>('cursor')
   const [shape, setShape] = useState<ShapeKind>(SHAPE_ORDER[0])
@@ -81,7 +113,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [focus, setFocus] = useState(false)
   const [idle, setIdle] = useState(false)
-  const [toast, setToast] = useState<string | null>(null)
+  const [toast, setToast] = useState<Toast | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const dirty = useRef(false)
@@ -143,33 +175,72 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [activeSlug])
+  }, [activeSlug, setInk, setPast, setFuture])
+
+  /** The (slug, ink) pair the debounce is holding — never the live `activeSlug`,
+   *  so a flush writes the storyline the edit was actually made on. */
+  const pending = useRef<{ slug: string; ink: StoryInk } | null>(null)
+
+  /**
+   * Writes the pending ink out now. Safe to call twice: the pair is taken before
+   * the request goes out, so the timer firing and a storyline switch flushing
+   * can't both PUT the same edit.
+   */
+  const flushInk = useCallback(async (keepalive = false) => {
+    const p = pending.current
+    if (!p) return
+    pending.current = null
+    try {
+      await saveInk(p.slug, p.ink, keepalive)
+      // The edit is only on disk once the PUT came back OK — clear a failure
+      // that is now stale.
+      setToast((t) => (t?.sticky ? null : t))
+    } catch (err) {
+      setToast({
+        text: err instanceof Error ? `Not saved — ${err.message}` : 'Not saved',
+        sticky: true,
+      })
+    }
+  }, [])
 
   useEffect(() => {
     if (!activeSlug || !dirty.current) return
-    const id = setTimeout(() => void saveInk(activeSlug, ink), 600)
+    pending.current = { slug: activeSlug, ink }
+    const id = setTimeout(() => void flushInk(), 600)
     return () => clearTimeout(id)
-  }, [ink, activeSlug])
+  }, [ink, activeSlug, flushInk])
+
+  // Leaving a storyline tears the debounce down mid-flight. Flush instead of
+  // dropping it — otherwise a switch within 600ms of a stroke lost the stroke.
+  useEffect(() => {
+    return () => void flushInk()
+  }, [activeSlug, flushInk])
+
+  // Same again for the page going away, where the request has to outlive it.
+  useEffect(() => {
+    const onLeave = () => void flushInk(true)
+    window.addEventListener('beforeunload', onLeave)
+    return () => window.removeEventListener('beforeunload', onLeave)
+  }, [flushInk])
 
   /* ------------------------------------------------------------ mutations */
 
   const mutate = useCallback(
     (next: (prev: StoryInk) => StoryInk) => {
-      setInk((prev) => {
-        setPast((p) => [...p.slice(-HISTORY_LIMIT), prev])
-        setFuture([])
-        dirty.current = true
-        const updated = next(prev)
-        if (activeSlug) {
-          setInkCounts((c) => ({
-            ...c,
-            [activeSlug]: Object.values(updated).reduce((n, els) => n + els.length, 0),
-          }))
-        }
-        return updated
-      })
+      const prev = inkRef.current
+      const updated = next(prev)
+      dirty.current = true
+      setInk(updated)
+      setPast([...pastRef.current.slice(-HISTORY_LIMIT), prev])
+      setFuture([])
+      if (activeSlug) {
+        setInkCounts((c) => ({
+          ...c,
+          [activeSlug]: Object.values(updated).reduce((n, els) => n + els.length, 0),
+        }))
+      }
     },
-    [activeSlug],
+    [activeSlug, setInk, setPast, setFuture],
   )
 
   const commit = useCallback(
@@ -218,30 +289,22 @@ export default function App() {
   useEffect(() => setSelectedId(null), [slide?.key, activeSlug, tool])
 
   const undo = useCallback(() => {
-    setPast((p) => {
-      if (!p.length) return p
-      const prev = p[p.length - 1]
-      setInk((current) => {
-        setFuture((f) => [current, ...f].slice(0, HISTORY_LIMIT))
-        return prev
-      })
-      dirty.current = true
-      return p.slice(0, -1)
-    })
-  }, [])
+    const p = pastRef.current
+    if (!p.length) return
+    dirty.current = true
+    setFuture([inkRef.current, ...futureRef.current].slice(0, HISTORY_LIMIT))
+    setInk(p[p.length - 1])
+    setPast(p.slice(0, -1))
+  }, [setFuture, setInk, setPast])
 
   const redo = useCallback(() => {
-    setFuture((f) => {
-      if (!f.length) return f
-      const next = f[0]
-      setInk((current) => {
-        setPast((p) => [...p.slice(-HISTORY_LIMIT), current])
-        return next
-      })
-      dirty.current = true
-      return f.slice(1)
-    })
-  }, [])
+    const f = futureRef.current
+    if (!f.length) return
+    dirty.current = true
+    setPast([...pastRef.current.slice(-HISTORY_LIMIT), inkRef.current])
+    setInk(f[0])
+    setFuture(f.slice(1))
+  }, [setFuture, setInk, setPast])
 
   /* ----------------------------------------------------------- navigation */
 
@@ -298,14 +361,14 @@ export default function App() {
     async (blob: Blob) => {
       if (!activeSlug || !slide || adding.current) return
       adding.current = true
-      setToast('Adding image…')
+      setToast({ text: 'Adding image…' })
       try {
         const [src, natural] = await Promise.all([addImage(activeSlug, blob), measureImage(blob)])
         const nth = slideInk.filter((el) => el.kind === 'image').length
         commit({ id: uid(), kind: 'image', src, ...placeImage(natural, nth) })
-        setToast(src)
+        setToast({ text: src })
       } catch (err) {
-        setToast(err instanceof Error ? err.message : 'Could not add the image')
+        setToast({ text: err instanceof Error ? err.message : 'Could not add the image' })
       } finally {
         adding.current = false
       }
@@ -314,7 +377,8 @@ export default function App() {
   )
 
   useEffect(() => {
-    if (!toast) return
+    // A sticky toast is a failed save — it stays until a save succeeds.
+    if (!toast || toast.sticky) return
     const id = setTimeout(() => setToast(null), 2600)
     return () => clearTimeout(id)
   }, [toast])
@@ -601,7 +665,13 @@ export default function App() {
             up in the recording. */}
         {toast && (
           <div className="pointer-events-none absolute bottom-4 left-7 z-20">
-            <span className="label rounded-md bg-white/[0.06] px-2.5 py-1.5 text-dim">{toast}</span>
+            <span
+              className={`label rounded-md bg-white/[0.06] px-2.5 py-1.5 ${
+                toast.sticky ? 'text-accent' : 'text-dim'
+              }`}
+            >
+              {toast.text}
+            </span>
           </div>
         )}
       </main>

@@ -54,10 +54,17 @@ export async function fetchInk(slug: string): Promise<StoryInk> {
   return res.json()
 }
 
-export async function saveInk(slug: string, ink: StoryInk): Promise<void> {
-  await fetch(`/api/ink/${encodeURIComponent(slug)}`, {
+/**
+ * `keepalive` is for the last write on the way out of the page — the request
+ * outlives the document. It caps the body at ~64KB, so it is only used on
+ * unload, never for the ordinary debounced save.
+ */
+export async function saveInk(slug: string, ink: StoryInk, keepalive = false): Promise<void> {
+  const res = await fetch(`/api/ink/${encodeURIComponent(slug)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(ink),
+    keepalive,
   })
+  if (!res.ok) throw new Error(`ink save: ${res.status}`)
 }
