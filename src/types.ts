@@ -47,12 +47,37 @@ export type Tool = 'cursor' | 'pen' | 'highlighter' | 'arrow' | 'shape' | 'text'
 
 export type ShapeKind = 'rect' | 'ellipse' | 'triangle' | 'line'
 
+/** A rectangle in stage units — a bounding box, or a box to map one into. */
+export interface Box {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/**
+ * The visual style every annotation carries. One shape for all kinds, so an edit
+ * ("make this thinner") is written once rather than per element type.
+ */
+export interface ElStyle {
+  /** The mark's own colour. Rendered as SVG fill for freehand + text, stroke for arrow/shape. */
+  stroke: string
+  /** Interior fill. Only meaningful for closed shapes (rect/ellipse/triangle); null elsewhere. */
+  fill: string | null
+  strokeWidth: number
+  opacity: number
+}
+
 export interface StrokeEl {
   id: string
   kind: 'stroke'
-  color: string
-  size: number
-  opacity: number
+  style: ElStyle
+  /**
+   * Which nib drew it. Stored, never derived from opacity: opacity is an editable
+   * property, so a pen stroke dimmed to 60% must not start rendering with the
+   * highlighter's flat, taper-less geometry.
+   */
+  brush: 'pen' | 'highlighter'
   /** [x, y, pressure] in the fixed 1600x900 stage space. */
   points: number[][]
 }
@@ -60,8 +85,7 @@ export interface StrokeEl {
 export interface ArrowEl {
   id: string
   kind: 'arrow'
-  color: string
-  size: number
+  style: ElStyle
   from: [number, number]
   to: [number, number]
 }
@@ -70,8 +94,7 @@ export interface ShapeEl {
   id: string
   kind: 'shape'
   shape: ShapeKind
-  color: string
-  size: number
+  style: ElStyle
   from: [number, number]
   to: [number, number]
 }
@@ -79,8 +102,9 @@ export interface ShapeEl {
 export interface TextEl {
   id: string
   kind: 'text'
-  color: string
-  size: number
+  /** Text is filled, not stroked — `style.strokeWidth` is unused and stays 0. */
+  style: ElStyle
+  fontSize: number
   x: number
   y: number
   text: string
@@ -96,6 +120,8 @@ export interface ImageEl {
   kind: 'image'
   /** Filename under `Content/Stories/images/`, resolved by the asset server. */
   src: string
+  /** Only `opacity` means anything here; the rest exists so every element is uniform. */
+  style: ElStyle
   x: number
   y: number
   w: number

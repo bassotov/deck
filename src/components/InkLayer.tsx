@@ -7,6 +7,7 @@ import {
   arrowToPath,
   boundsOf,
   hitsElement,
+  makeStyle,
   resizeImage,
   shapeToPath,
   snapAngle,
@@ -30,8 +31,8 @@ interface Props {
   tool: Tool
   shape: ShapeKind
   color: string
-  selectedId: string | null
-  onSelect: (id: string | null) => void
+  selectedIds: string[]
+  onSelect: (ids: string[]) => void
   onCommit: (el: InkEl) => void
   onUpdate: (el: InkEl) => void
   onErase: (ids: string[]) => void
@@ -43,14 +44,15 @@ function TextElement({ el }: { el: TextEl }) {
     <text
       x={el.x}
       y={el.y}
-      fill={el.color}
-      fontSize={el.size}
+      fill={el.style.stroke}
+      opacity={el.style.opacity}
+      fontSize={el.fontSize}
       fontFamily="Caveat, cursive"
       fontWeight={600}
       style={{ whiteSpace: 'pre' }}
     >
       {lines.map((line, i) => (
-        <tspan key={i} x={el.x} dy={i === 0 ? 0 : el.size * 1.02}>
+        <tspan key={i} x={el.x} dy={i === 0 ? 0 : el.fontSize * 1.02}>
           {line || ' '}
         </tspan>
       ))}
@@ -67,6 +69,7 @@ function Visual({ el }: { el: InkEl }) {
         y={el.y}
         width={el.w}
         height={el.h}
+        opacity={el.style.opacity}
         preserveAspectRatio="xMidYMid meet"
       />
     )
@@ -75,9 +78,11 @@ function Visual({ el }: { el: InkEl }) {
     return (
       <path
         d={el.kind === 'arrow' ? arrowToPath(el) : shapeToPath(el)}
-        fill="none"
-        stroke={el.color}
-        strokeWidth={el.size}
+        // Only a closed shape has an interior; filling an arrow would fill its head.
+        fill={(el.kind === 'shape' && el.style.fill) || 'none'}
+        stroke={el.style.stroke}
+        strokeWidth={el.style.strokeWidth}
+        opacity={el.style.opacity}
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -87,9 +92,9 @@ function Visual({ el }: { el: InkEl }) {
   return (
     <path
       d={strokeToPath(el)}
-      fill={el.color}
-      opacity={el.opacity}
-      className={el.opacity < 1 ? 'ink-highlight' : undefined}
+      fill={el.style.stroke}
+      opacity={el.style.opacity}
+      className={el.brush === 'highlighter' ? 'ink-highlight' : undefined}
     />
   )
 }
@@ -130,7 +135,7 @@ function HitArea({ el }: { el: InkEl }) {
         d={el.kind === 'arrow' ? arrowToPath(el) : shapeToPath(el)}
         fill="none"
         stroke="transparent"
-        strokeWidth={el.size + 24}
+        strokeWidth={el.style.strokeWidth + 24}
         pointerEvents={closed ? 'stroke' : 'all'}
       />
     )
@@ -151,7 +156,7 @@ export default function InkLayer({
   tool,
   shape,
   color,
-  selectedId,
+  selectedIds,
   onSelect,
   onCommit,
   onUpdate,
@@ -172,6 +177,15 @@ export default function InkLayer({
 
   const active = tool !== 'cursor'
   const selecting = tool === 'cursor'
+
+  /** The nib a freehand stroke draws with, and the style it commits with. The
+   *  highlighter's dimming belongs to the nib — nothing reads it back the other way. */
+  const brush = tool === 'highlighter' ? 'highlighter' : 'pen'
+  const brushStyle = makeStyle({
+    stroke: color,
+    strokeWidth: TOOL_SIZE[brush],
+    opacity: brush === 'highlighter' ? 0.32 : 1,
+  })
 
   const toStage = useCallback((clientX: number, clientY: number): [number, number] => {
     const rect = svgRef.current!.getBoundingClientRect()
@@ -205,8 +219,8 @@ export default function InkLayer({
     onCommit({
       id: uid(),
       kind: 'text',
-      color,
-      size: TOOL_SIZE.text,
+      style: makeStyle({ stroke: color }),
+      fontSize: TOOL_SIZE.text,
       x: current.x,
       y: current.y,
       text: current.value.replace(/\s+$/, ''),
@@ -301,13 +315,18 @@ export default function InkLayer({
       if (Math.hypot(dragTo[0] - x1, dragTo[1] - y1) > 14) {
         onCommit(
           tool === 'arrow'
-            ? { id: uid(), kind: 'arrow', color, size: TOOL_SIZE.arrow, from: start.current, to: dragTo }
+            ? {
+                id: uid(),
+                kind: 'arrow',
+                style: makeStyle({ stroke: color, strokeWidth: TOOL_SIZE.arrow }),
+                from: start.current,
+                to: dragTo,
+              }
             : {
                 id: uid(),
                 kind: 'shape',
                 shape,
-                color,
-                size: TOOL_SIZE.shape,
+                style: makeStyle({ stroke: color, strokeWidth: TOOL_SIZE.shape }),
                 from: start.current,
                 to: dragTo,
               },
@@ -318,14 +337,7 @@ export default function InkLayer({
     }
 
     if (points && points.length > 1 && (tool === 'pen' || tool === 'highlighter')) {
-      onCommit({
-        id: uid(),
-        kind: 'stroke',
-        color,
-        size: TOOL_SIZE[tool],
-        opacity: tool === 'highlighter' ? 0.32 : 1,
-        points,
-      })
+      onCommit({ id: uid(), kind: 'stroke', brush: tool, style: brushStyle, points })
     }
     setPoints(null)
   }
@@ -338,7 +350,7 @@ export default function InkLayer({
     e.preventDefault()
     e.currentTarget.setPointerCapture(e.pointerId)
     dragFrom.current = toStage(e.clientX, e.clientY)
-    onSelect(el.id)
+    onSelect([el.id])
     setDrag({ id: el.id, dx: 0, dy: 0 })
   }
 
@@ -409,7 +421,7 @@ export default function InkLayer({
       ordered.map((el) => {
         const moving = drag?.id === el.id ? drag : null
         const live = sizing?.id === el.id && el.kind === 'image' ? { ...el, ...sizing } : el
-        const selected = selecting && selectedId === el.id
+        const selected = selecting && selectedIds.includes(el.id)
         return (
           <g
             key={el.id}
@@ -443,12 +455,12 @@ export default function InkLayer({
         )
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ordered, selecting, selectedId, drag, sizing],
+    [ordered, selecting, selectedIds, drag, sizing],
   )
 
   const scale = pxPerUnit()
   const preview = editing
-    ? textBox({ ...editing, id: '', kind: 'text', color, size: TOOL_SIZE.text, text: editing.value })
+    ? textBox({ x: editing.x, y: editing.y, text: editing.value, fontSize: TOOL_SIZE.text })
     : null
 
   return (
@@ -468,19 +480,19 @@ export default function InkLayer({
         {committed}
         {points && points.length > 0 && (
           <path
-            d={strokeToPath({
-              points,
-              size: TOOL_SIZE[tool === 'highlighter' ? 'highlighter' : 'pen'],
-              opacity: tool === 'highlighter' ? 0.32 : 1,
-            })}
-            fill={color}
-            opacity={tool === 'highlighter' ? 0.32 : 1}
-            className={tool === 'highlighter' ? 'ink-highlight' : undefined}
+            d={strokeToPath({ points, brush, style: brushStyle })}
+            fill={brushStyle.stroke}
+            opacity={brushStyle.opacity}
+            className={brush === 'highlighter' ? 'ink-highlight' : undefined}
           />
         )}
         {dragTo && tool === 'arrow' && (
           <path
-            d={arrowToPath({ from: start.current, to: dragTo, size: TOOL_SIZE.arrow })}
+            d={arrowToPath({
+              from: start.current,
+              to: dragTo,
+              style: makeStyle({ strokeWidth: TOOL_SIZE.arrow }),
+            })}
             fill="none"
             stroke={color}
             strokeWidth={TOOL_SIZE.arrow}

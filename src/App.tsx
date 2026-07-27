@@ -4,7 +4,15 @@ import SlideView from './components/SlideView'
 import InkLayer from './components/InkLayer'
 import ToolRail from './components/ToolRail'
 import { addImage, createStory, fetchInk, fetchStories, saveInk } from './lib/api'
-import { INK_COLORS, SHAPE_ORDER, TOOL_ORDER, placeImage, uid } from './lib/ink'
+import {
+  INK_COLORS,
+  SHAPE_ORDER,
+  TOOL_ORDER,
+  makeStyle,
+  normalizeEl,
+  placeImage,
+  uid,
+} from './lib/ink'
 import type { InkEl, ShapeKind, Story, StoryInk, Tool } from './types'
 
 const HISTORY_LIMIT = 60
@@ -114,7 +122,7 @@ export default function App() {
   const [focus, setFocus] = useState(false)
   const [idle, setIdle] = useState(false)
   const [toast, setToast] = useState<Toast | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
 
   const dirty = useRef(false)
 
@@ -166,10 +174,20 @@ export default function App() {
     setFuture([])
     void fetchInk(activeSlug).then((data) => {
       if (cancelled) return
-      setInk(data)
+      // The one place on-disk shapes are read. Everything downstream — renderers,
+      // hit-tests, geometry — sees only the current shape, never a legacy fallback.
+      const loaded: StoryInk = Object.fromEntries(
+        Object.entries(data).map(([key, els]) => [
+          key,
+          (Array.isArray(els) ? els : [])
+            .map(normalizeEl)
+            .filter((el): el is InkEl => el !== null),
+        ]),
+      )
+      setInk(loaded)
       setInkCounts((c) => ({
         ...c,
-        [activeSlug]: Object.values(data).reduce((n, els) => n + els.length, 0),
+        [activeSlug]: Object.values(loaded).reduce((n, els) => n + els.length, 0),
       }))
     })
     return () => {
@@ -243,24 +261,32 @@ export default function App() {
     [activeSlug, setInk, setPast, setFuture],
   )
 
-  const commit = useCallback(
-    (el: InkEl) => {
-      if (!slide) return
-      mutate((prev) => ({ ...prev, [slide.key]: [...(prev[slide.key] ?? []), el] }))
+  /* Batch first, single as the thin wrapper: one gesture is one history entry, whether
+     it moved one element or ten — the shape `erase` has always had. */
+
+  const commitMany = useCallback(
+    (els: InkEl[]) => {
+      if (!slide || !els.length) return
+      mutate((prev) => ({ ...prev, [slide.key]: [...(prev[slide.key] ?? []), ...els] }))
     },
     [mutate, slide],
   )
 
-  const update = useCallback(
-    (el: InkEl) => {
-      if (!slide) return
+  const updateMany = useCallback(
+    (els: InkEl[]) => {
+      if (!slide || !els.length) return
+      const next = new Map(els.map((el) => [el.id, el]))
       mutate((prev) => ({
         ...prev,
-        [slide.key]: (prev[slide.key] ?? []).map((e) => (e.id === el.id ? el : e)),
+        [slide.key]: (prev[slide.key] ?? []).map((el) => next.get(el.id) ?? el),
       }))
     },
     [mutate, slide],
   )
+
+  const commit = useCallback((el: InkEl) => commitMany([el]), [commitMany])
+
+  const update = useCallback((el: InkEl) => updateMany([el]), [updateMany])
 
   const erase = useCallback(
     (ids: string[]) => {
@@ -279,14 +305,20 @@ export default function App() {
     mutate((prev) => ({ ...prev, [slide.key]: [] }))
   }, [mutate, slide, slideInk.length])
 
+  /** Keeps the empty array identical when nothing was selected, so clicking bare
+   *  slide doesn't re-render every element for a no-op. */
+  const clearSelection = useCallback(() => {
+    setSelectedIds((current) => (current.length ? [] : current))
+  }, [])
+
   const deleteSelected = useCallback(() => {
-    if (!selectedId) return
-    erase([selectedId])
-    setSelectedId(null)
-  }, [erase, selectedId])
+    if (!selectedIds.length) return
+    erase(selectedIds)
+    clearSelection()
+  }, [clearSelection, erase, selectedIds])
 
   // A selection can't outlive the slide it was made on.
-  useEffect(() => setSelectedId(null), [slide?.key, activeSlug, tool])
+  useEffect(clearSelection, [clearSelection, slide?.key, activeSlug, tool])
 
   const undo = useCallback(() => {
     const p = pastRef.current
@@ -365,7 +397,7 @@ export default function App() {
       try {
         const [src, natural] = await Promise.all([addImage(activeSlug, blob), measureImage(blob)])
         const nth = slideInk.filter((el) => el.kind === 'image').length
-        commit({ id: uid(), kind: 'image', src, ...placeImage(natural, nth) })
+        commit({ id: uid(), kind: 'image', src, style: makeStyle(), ...placeImage(natural, nth) })
         setToast({ text: src })
       } catch (err) {
         setToast({ text: err instanceof Error ? err.message : 'Could not add the image' })
@@ -603,7 +635,7 @@ export default function App() {
           <div className="flex flex-col items-center gap-4" style={{ width: stageWidth }}>
             {/* A press that lands on the slide rather than on an object clears
                 the selection — the ink elements stop propagation. */}
-            <div className="stage w-full" onPointerDown={() => setSelectedId(null)}>
+            <div className="stage w-full" onPointerDown={clearSelection}>
               {slide ? (
                 <SlideView slide={slide} />
               ) : (
@@ -626,8 +658,8 @@ export default function App() {
                   tool={tool}
                   shape={shape}
                   color={color}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
+                  selectedIds={selectedIds}
+                  onSelect={setSelectedIds}
                   onCommit={commit}
                   onUpdate={update}
                   onErase={erase}

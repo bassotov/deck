@@ -1,5 +1,16 @@
 import { getStroke } from 'perfect-freehand'
-import type { ArrowEl, ImageEl, InkEl, ShapeEl, ShapeKind, StrokeEl, TextEl, Tool } from '../types'
+import type {
+  ArrowEl,
+  Box,
+  ElStyle,
+  ImageEl,
+  InkEl,
+  ShapeEl,
+  ShapeKind,
+  StrokeEl,
+  TextEl,
+  Tool,
+} from '../types'
 
 /** Every annotation lives in this fixed space; the SVG viewBox does the scaling. */
 export const STAGE_W = 1600
@@ -35,6 +46,17 @@ export const TOOL_SIZE: Record<Exclude<Tool, 'cursor' | 'eraser'>, number> = {
 }
 
 export const uid = () => Math.random().toString(36).slice(2, 10)
+
+/** Falls back to the colour a fresh session draws in, for data that names none. */
+const DEFAULT_STROKE = INK_COLORS[0].value
+
+/**
+ * Every element carries a full style, so the fields a given kind ignores still need
+ * a value — `strokeWidth` on text, `fill` everywhere until a shape asks for one.
+ */
+export function makeStyle(patch: Partial<ElStyle> = {}): ElStyle {
+  return { stroke: DEFAULT_STROKE, fill: null, strokeWidth: 0, opacity: 1, ...patch }
+}
 
 /**
  * Trackpad and mouse report no useful pressure, so perfect-freehand simulates it
@@ -76,17 +98,22 @@ function svgFromOutline(outline: number[][]): string {
   return d.join(' ')
 }
 
-export function strokeToPath(el: Pick<StrokeEl, 'points' | 'size' | 'opacity'>): string {
-  const base = el.opacity < 1 ? HIGHLIGHTER_OPTS : PEN_OPTS
-  return svgFromOutline(getStroke(el.points, { ...base, size: el.size }))
+/** The nib decides the geometry — never the opacity, which the user can dial freely. */
+export function strokeToPath({
+  points,
+  brush,
+  style,
+}: Pick<StrokeEl, 'points' | 'brush' | 'style'>): string {
+  const base = brush === 'highlighter' ? HIGHLIGHTER_OPTS : PEN_OPTS
+  return svgFromOutline(getStroke(points, { ...base, size: style.strokeWidth }))
 }
 
-export function arrowToPath({ from, to, size }: Pick<ArrowEl, 'from' | 'to' | 'size'>): string {
+export function arrowToPath({ from, to, style }: Pick<ArrowEl, 'from' | 'to' | 'style'>): string {
   const [x1, y1] = from
   const [x2, y2] = to
   const angle = Math.atan2(y2 - y1, x2 - x1)
   const len = Math.hypot(x2 - x1, y2 - y1)
-  const head = Math.min(len * 0.34, size * 6.5)
+  const head = Math.min(len * 0.34, style.strokeWidth * 6.5)
   const wing = (a: number) =>
     `M ${x2} ${y2} L ${x2 + Math.cos(angle + Math.PI + a) * head} ${
       y2 + Math.sin(angle + Math.PI + a) * head
@@ -170,6 +197,44 @@ export function translateEl(el: InkEl, dx: number, dy: number): InkEl {
   }
 }
 
+/** A zero-extent axis — a perfectly horizontal line — has nothing to divide by. */
+const axisScale = (from: number, to: number) => (from > 0 ? to / from : 1)
+
+/**
+ * Map an element out of one box and into another. No minimum size is enforced here:
+ * clamping belongs to the interaction that drives the drag, not to the geometry.
+ */
+export function scaleEl(el: InkEl, from: Box, to: Box): InkEl {
+  const sx = axisScale(from.w, to.w)
+  const sy = axisScale(from.h, to.h)
+  // Widths and font sizes have no axis of their own, so they follow the geometric
+  // mean — a box pulled twice as wide but no taller thickens by √2, not by 2.
+  const sm = Math.sqrt(sx * sy)
+  const mapX = (x: number) => to.x + (x - from.x) * sx
+  const mapY = (y: number) => to.y + (y - from.y) * sy
+
+  switch (el.kind) {
+    case 'stroke':
+      return {
+        ...el,
+        style: { ...el.style, strokeWidth: el.style.strokeWidth * sm },
+        points: el.points.map(([x, y, p]) => [mapX(x), mapY(y), p]),
+      }
+    case 'arrow':
+    case 'shape':
+      return {
+        ...el,
+        style: { ...el.style, strokeWidth: el.style.strokeWidth * sm },
+        from: [mapX(el.from[0]), mapY(el.from[1])],
+        to: [mapX(el.to[0]), mapY(el.to[1])],
+      }
+    case 'text':
+      return { ...el, x: mapX(el.x), y: mapY(el.y), fontSize: el.fontSize * sm }
+    case 'image':
+      return { ...el, x: mapX(el.x), y: mapY(el.y), w: el.w * sx, h: el.h * sy }
+  }
+}
+
 /* ---------------------------------------------------------------- images */
 
 /** The box a pasted image is fitted into, in stage units. */
@@ -201,7 +266,7 @@ export function resizeImage(from: { x: number; w: number; h: number }, cornerX: 
 }
 
 /** Bounding box of any element, for drawing the selection outline. */
-export function boundsOf(el: InkEl) {
+export function boundsOf(el: InkEl): Box {
   switch (el.kind) {
     case 'image':
       return { x: el.x, y: el.y, w: el.w, h: el.h }
@@ -218,26 +283,41 @@ export function boundsOf(el: InkEl) {
     default: {
       const xs = el.points.map((p) => p[0])
       const ys = el.points.map((p) => p[1])
-      const pad = el.size / 2
+      const width = el.style.strokeWidth
+      const pad = width / 2
       return {
         x: Math.min(...xs) - pad,
         y: Math.min(...ys) - pad,
-        w: Math.max(...xs) - Math.min(...xs) + el.size,
-        h: Math.max(...ys) - Math.min(...ys) + el.size,
+        w: Math.max(...xs) - Math.min(...xs) + width,
+        h: Math.max(...ys) - Math.min(...ys) + width,
       }
     }
   }
 }
 
+/** Union box over a set — the frame a multi-selection is moved and scaled by. */
+export function boundsOfMany(els: InkEl[]): Box {
+  if (!els.length) return { x: 0, y: 0, w: 0, h: 0 }
+  const boxes = els.map(boundsOf)
+  const x = Math.min(...boxes.map((b) => b.x))
+  const y = Math.min(...boxes.map((b) => b.y))
+  return {
+    x,
+    y,
+    w: Math.max(...boxes.map((b) => b.x + b.w)) - x,
+    h: Math.max(...boxes.map((b) => b.y + b.h)) - y,
+  }
+}
+
 /** Rough box around a text element — enough for the eraser to grab it. */
-export function textBox(el: TextEl) {
+export function textBox(el: Pick<TextEl, 'x' | 'y' | 'text' | 'fontSize'>): Box {
   const lines = el.text.split('\n')
   const longest = lines.reduce((n, l) => Math.max(n, l.length), 0)
   return {
     x: el.x,
-    y: el.y - el.size * 0.78,
-    w: longest * el.size * 0.4,
-    h: lines.length * el.size * 1.02,
+    y: el.y - el.fontSize * 0.78,
+    w: longest * el.fontSize * 0.4,
+    h: lines.length * el.fontSize * 1.02,
   }
 }
 
@@ -287,10 +367,11 @@ function nearPolyline(pts: number[][], x: number, y: number, r: number): boolean
 
 export function hitsElement(el: InkEl, x: number, y: number, radius: number): boolean {
   if (el.kind === 'arrow') {
-    return distToSegment(x, y, el.from[0], el.from[1], el.to[0], el.to[1]) <= radius + el.size
+    const r = radius + el.style.strokeWidth
+    return distToSegment(x, y, el.from[0], el.from[1], el.to[0], el.to[1]) <= r
   }
   if (el.kind === 'shape') {
-    return nearPolyline(shapeOutline(el), x, y, radius + el.size)
+    return nearPolyline(shapeOutline(el), x, y, radius + el.style.strokeWidth)
   }
   if (el.kind === 'text' || el.kind === 'image') {
     const b = el.kind === 'text' ? textBox(el) : el
@@ -299,10 +380,125 @@ export function hitsElement(el: InkEl, x: number, y: number, radius: number): bo
     )
   }
   const pts = el.points
-  const r = radius + el.size / 2
+  const r = radius + el.style.strokeWidth / 2
   if (pts.length === 1) return Math.hypot(x - pts[0][0], y - pts[0][1]) <= r
   for (let i = 0; i < pts.length - 1; i++) {
     if (distToSegment(x, y, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]) <= r) return true
   }
   return false
+}
+
+/* ------------------------------------------------------------ load boundary */
+
+type Raw = Record<string, unknown>
+
+const num = (v: unknown, fallback: number) =>
+  typeof v === 'number' && Number.isFinite(v) ? v : fallback
+
+const str = (v: unknown, fallback: string) => (typeof v === 'string' && v ? v : fallback)
+
+function readPoint(v: unknown): [number, number] | null {
+  if (!Array.isArray(v) || typeof v[0] !== 'number' || typeof v[1] !== 'number') return null
+  return [v[0], v[1]]
+}
+
+function readPoints(v: unknown): number[][] | null {
+  if (!Array.isArray(v) || !v.length) return null
+  const pts: number[][] = []
+  for (const p of v) {
+    const xy = readPoint(p)
+    if (!xy) return null
+    // Pressure is what the pointer reported; 0.5 is the same stand-in drawing uses.
+    pts.push([xy[0], xy[1], num((p as unknown[])[2], 0.5)])
+  }
+  return pts
+}
+
+/**
+ * `width` is the fallback for a row that names no size. Text passes 0: its legacy
+ * `size` is a font size and belongs to `fontSize`, not to a stroke width.
+ */
+function readStyle(raw: Raw, width: number): ElStyle {
+  const s = (typeof raw.style === 'object' && raw.style !== null ? raw.style : {}) as Raw
+  return {
+    stroke: str(s.stroke, str(raw.color, DEFAULT_STROKE)),
+    fill: typeof s.fill === 'string' && s.fill ? s.fill : null,
+    strokeWidth: num(s.strokeWidth, width),
+    opacity: num(s.opacity, num(raw.opacity, 1)),
+  }
+}
+
+/**
+ * The single boundary between what is on disk and what the app runs on. Decks written
+ * before styles were grouped carry flat `color` / `size` / `opacity`; both shapes go in
+ * and only the current one comes out, so no renderer, hit-test or geometry function
+ * ever needs a fallback. Junk returns null for the caller to drop.
+ *
+ * There is no version field on purpose: one always-latest writer, dev-server only. A
+ * slide upgrades on disk the next time it is saved.
+ */
+export function normalizeEl(raw: unknown): InkEl | null {
+  if (!raw || typeof raw !== 'object') return null
+  const el = raw as Raw
+  const id = str(el.id, uid())
+
+  switch (el.kind) {
+    case 'stroke': {
+      const points = readPoints(el.points)
+      if (!points) return null
+      const style = readStyle(el, num(el.size, TOOL_SIZE.pen))
+      return {
+        id,
+        kind: 'stroke',
+        // Before opacity was editable, a dimmed stroke could only have been a
+        // highlighter — which is exactly what makes deriving it now unsafe.
+        brush:
+          el.brush === 'highlighter' || el.brush === 'pen'
+            ? el.brush
+            : style.opacity < 1
+              ? 'highlighter'
+              : 'pen',
+        style,
+        points,
+      }
+    }
+    case 'arrow':
+    case 'shape': {
+      const from = readPoint(el.from)
+      const to = readPoint(el.to)
+      if (!from || !to) return null
+      const kindDefault = el.kind === 'arrow' ? TOOL_SIZE.arrow : TOOL_SIZE.shape
+      const style = readStyle(el, num(el.size, kindDefault))
+      if (el.kind === 'arrow') return { id, kind: 'arrow', style, from, to }
+      const shape = SHAPE_ORDER.find((s) => s === el.shape) ?? 'rect'
+      return { id, kind: 'shape', shape, style, from, to }
+    }
+    case 'text': {
+      if (typeof el.text !== 'string') return null
+      return {
+        id,
+        kind: 'text',
+        style: readStyle(el, 0),
+        fontSize: num(el.fontSize, num(el.size, TOOL_SIZE.text)),
+        x: num(el.x, 0),
+        y: num(el.y, 0),
+        text: el.text,
+      }
+    }
+    case 'image': {
+      if (typeof el.src !== 'string' || !el.src) return null
+      return {
+        id,
+        kind: 'image',
+        src: el.src,
+        style: readStyle(el, 0),
+        x: num(el.x, 0),
+        y: num(el.y, 0),
+        w: num(el.w, 0),
+        h: num(el.h, 0),
+      }
+    }
+    default:
+      return null
+  }
 }

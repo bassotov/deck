@@ -48,7 +48,11 @@ export async function addImage(slug: string, blob: Blob): Promise<string> {
   return body.name as string
 }
 
-export async function fetchInk(slug: string): Promise<StoryInk> {
+/**
+ * Deliberately untyped elements: what is on disk may predate the current element
+ * shape, so the caller has to run it through `normalizeEl` before it is `StoryInk`.
+ */
+export async function fetchInk(slug: string): Promise<Record<string, unknown[]>> {
   const res = await fetch(`/api/ink/${encodeURIComponent(slug)}`)
   if (!res.ok) return {}
   return res.json()
