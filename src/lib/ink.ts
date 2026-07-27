@@ -1,5 +1,5 @@
 import { getStroke } from 'perfect-freehand'
-import type { ArrowEl, InkEl, ShapeEl, ShapeKind, StrokeEl, TextEl, Tool } from '../types'
+import type { ArrowEl, ImageEl, InkEl, ShapeEl, ShapeKind, StrokeEl, TextEl, Tool } from '../types'
 
 /** Every annotation lives in this fixed space; the SVG viewBox does the scaling. */
 export const STAGE_W = 1600
@@ -165,7 +165,67 @@ export function translateEl(el: InkEl, dx: number, dy: number): InkEl {
         to: [el.to[0] + dx, el.to[1] + dy],
       }
     case 'text':
+    case 'image':
       return { ...el, x: el.x + dx, y: el.y + dy }
+  }
+}
+
+/* ---------------------------------------------------------------- images */
+
+/** The box a pasted image is fitted into, in stage units. */
+const IMAGE_FIT = { w: 700, h: 520 }
+
+export const IMAGE_MIN = 80
+
+/**
+ * Centre a pasted image, scaled to fit. Successive pastes on one slide cascade
+ * so the second doesn't land exactly on top of the first.
+ */
+export function placeImage(natural: { w: number; h: number }, nth: number) {
+  const scale = Math.min(IMAGE_FIT.w / natural.w, IMAGE_FIT.h / natural.h)
+  const w = Math.round(natural.w * scale)
+  const h = Math.round(natural.h * scale)
+  const step = (nth % 5) * 46
+  return { x: Math.round((STAGE_W - w) / 2) + step, y: Math.round((STAGE_H - h) / 2) + step, w, h }
+}
+
+/**
+ * Resize from the bottom-right corner, keeping the aspect ratio. The corner
+ * tracks the pointer directly rather than accumulating deltas — deltas measured
+ * against a size that is itself changing compound into a runaway drag.
+ */
+export function resizeImage(from: { x: number; w: number; h: number }, cornerX: number) {
+  const ratio = from.h / from.w
+  const w = Math.max(IMAGE_MIN, cornerX - from.x)
+  return { w: Math.round(w), h: Math.round(w * ratio) }
+}
+
+/** Bounding box of any element, for drawing the selection outline. */
+export function boundsOf(el: InkEl) {
+  switch (el.kind) {
+    case 'image':
+      return { x: el.x, y: el.y, w: el.w, h: el.h }
+    case 'text':
+      return textBox(el)
+    case 'arrow':
+    case 'shape':
+      return {
+        x: Math.min(el.from[0], el.to[0]),
+        y: Math.min(el.from[1], el.to[1]),
+        w: Math.abs(el.to[0] - el.from[0]),
+        h: Math.abs(el.to[1] - el.from[1]),
+      }
+    default: {
+      const xs = el.points.map((p) => p[0])
+      const ys = el.points.map((p) => p[1])
+      const pad = el.size / 2
+      return {
+        x: Math.min(...xs) - pad,
+        y: Math.min(...ys) - pad,
+        w: Math.max(...xs) - Math.min(...xs) + el.size,
+        h: Math.max(...ys) - Math.min(...ys) + el.size,
+      }
+    }
   }
 }
 
@@ -232,8 +292,8 @@ export function hitsElement(el: InkEl, x: number, y: number, radius: number): bo
   if (el.kind === 'shape') {
     return nearPolyline(shapeOutline(el), x, y, radius + el.size)
   }
-  if (el.kind === 'text') {
-    const b = textBox(el)
+  if (el.kind === 'text' || el.kind === 'image') {
+    const b = el.kind === 'text' ? textBox(el) : el
     return (
       x >= b.x - radius && x <= b.x + b.w + radius && y >= b.y - radius && y <= b.y + b.h + radius
     )

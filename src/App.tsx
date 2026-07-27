@@ -3,8 +3,8 @@ import Sidebar from './components/Sidebar'
 import SlideView from './components/SlideView'
 import InkLayer from './components/InkLayer'
 import ToolRail from './components/ToolRail'
-import { createStory, fetchInk, fetchStories, saveInk } from './lib/api'
-import { INK_COLORS, SHAPE_ORDER, TOOL_ORDER } from './lib/ink'
+import { addImage, createStory, fetchInk, fetchStories, saveInk } from './lib/api'
+import { INK_COLORS, SHAPE_ORDER, TOOL_ORDER, placeImage, uid } from './lib/ink'
 import type { InkEl, ShapeKind, Story, StoryInk, Tool } from './types'
 
 const HISTORY_LIMIT = 60
@@ -35,6 +35,23 @@ Write the beat here. <span class="hand">this bit</span> gets the handwritten acc
 > One sentence people can repeat.
 `
 
+/** Natural size of a pasted blob, so it can be placed at the right aspect ratio. */
+function measureImage(blob: Blob): Promise<{ w: number; h: number }> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob)
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      resolve({ w: img.naturalWidth, h: img.naturalHeight })
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('That file is not an image'))
+    }
+    img.src = url
+  })
+}
+
 /** `#/<slug>/<1-based slide>` — so a deck reopens exactly where it was left. */
 function readHash() {
   const m = window.location.hash.match(/^#\/([^/]+)(?:\/(\d+))?/)
@@ -64,6 +81,8 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [focus, setFocus] = useState(false)
   const [idle, setIdle] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const dirty = useRef(false)
 
@@ -189,6 +208,15 @@ export default function App() {
     mutate((prev) => ({ ...prev, [slide.key]: [] }))
   }, [mutate, slide, slideInk.length])
 
+  const deleteSelected = useCallback(() => {
+    if (!selectedId) return
+    erase([selectedId])
+    setSelectedId(null)
+  }, [erase, selectedId])
+
+  // A selection can't outlive the slide it was made on.
+  useEffect(() => setSelectedId(null), [slide?.key, activeSlug, tool])
+
   const undo = useCallback(() => {
     setPast((p) => {
       if (!p.length) return p
@@ -255,6 +283,68 @@ export default function App() {
     selectStory(slug)
   }, [load, selectStory])
 
+  /* ---------------------------------------------------------------- images */
+
+  /**
+   * Paste or drop an image and it lands on the slide you are looking at. The
+   * markdown in the vault is what changes — the deck reloads from that, so the
+   * paste is durable and editable in Obsidian like anything else.
+   */
+  // One drop can arrive as several events. Without this, a single drag wrote
+  // the same screenshot two or three times.
+  const adding = useRef(false)
+
+  const dropImage = useCallback(
+    async (blob: Blob) => {
+      if (!activeSlug || !slide || adding.current) return
+      adding.current = true
+      setToast('Adding image…')
+      try {
+        const [src, natural] = await Promise.all([addImage(activeSlug, blob), measureImage(blob)])
+        const nth = slideInk.filter((el) => el.kind === 'image').length
+        commit({ id: uid(), kind: 'image', src, ...placeImage(natural, nth) })
+        setToast(src)
+      } catch (err) {
+        setToast(err instanceof Error ? err.message : 'Could not add the image')
+      } finally {
+        adding.current = false
+      }
+    },
+    [activeSlug, slide, slideInk, commit],
+  )
+
+  useEffect(() => {
+    if (!toast) return
+    const id = setTimeout(() => setToast(null), 2600)
+    return () => clearTimeout(id)
+  }, [toast])
+
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const el = e.target as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+      const item = Array.from(e.clipboardData?.items ?? []).find((i) =>
+        i.type.startsWith('image/'),
+      )
+      const blob = item?.getAsFile()
+      if (!blob) return
+      e.preventDefault()
+      void dropImage(blob)
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [dropImage])
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      const file = Array.from(e.dataTransfer.files).find((f) => f.type.startsWith('image/'))
+      if (!file) return
+      e.preventDefault()
+      void dropImage(file)
+    },
+    [dropImage],
+  )
+
   /* ------------------------------------------------------------- keyboard */
 
   useEffect(() => {
@@ -271,6 +361,12 @@ export default function App() {
         return setSidebarOpen((v) => !v)
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return
+
+      // Backspace would otherwise walk the browser back a page.
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        e.preventDefault()
+        return deleteSelected()
+      }
 
       // Digits pick a tool, Shift+digit picks a colour. Read `code`, not `key` —
       // Shift+1 arrives as "!" on a Mac layout.
@@ -342,7 +438,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [clearSlide, focus, go, pickTool, redo, total, undo])
+  }, [clearSlide, deleteSelected, focus, go, pickTool, redo, total, undo])
 
   /* ---------------------------------------------------------------- wheel */
 
@@ -396,7 +492,12 @@ export default function App() {
         />
       )}
 
-      <main className="shell-atmosphere relative flex min-w-0 flex-1 flex-col" onWheel={onWheel}>
+      <main
+        className="shell-atmosphere relative flex min-w-0 flex-1 flex-col"
+        onWheel={onWheel}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={onDrop}
+      >
         {!focus && (
           <header className="relative z-10 flex items-center justify-between px-7 pt-5 pb-2">
             <div className="flex items-center gap-3">
@@ -436,7 +537,9 @@ export default function App() {
             or it lands inside the recording crop. */}
         <div className="relative z-10 flex min-h-0 flex-1 items-center justify-center pr-[92px] pb-6 pl-7">
           <div className="flex flex-col items-center gap-4" style={{ width: stageWidth }}>
-            <div className="stage w-full">
+            {/* A press that lands on the slide rather than on an object clears
+                the selection — the ink elements stop propagation. */}
+            <div className="stage w-full" onPointerDown={() => setSelectedId(null)}>
               {slide ? (
                 <SlideView slide={slide} />
               ) : (
@@ -459,6 +562,8 @@ export default function App() {
                   tool={tool}
                   shape={shape}
                   color={color}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
                   onCommit={commit}
                   onUpdate={update}
                   onErase={erase}
@@ -491,6 +596,14 @@ export default function App() {
             onClear={clearSlide}
           />
         </div>
+
+        {/* Bottom-left, outside the stage — a paste confirmation must never end
+            up in the recording. */}
+        {toast && (
+          <div className="pointer-events-none absolute bottom-4 left-7 z-20">
+            <span className="label rounded-md bg-white/[0.06] px-2.5 py-1.5 text-dim">{toast}</span>
+          </div>
+        )}
       </main>
     </div>
   )

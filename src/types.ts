@@ -1,4 +1,27 @@
-export type SlideLayout = 'title' | 'center' | 'quote' | 'columns' | 'default'
+export type SlideLayout =
+  | 'title'
+  | 'center'
+  | 'quote'
+  | 'columns'
+  | 'flow'
+  | 'stats'
+  | 'versus'
+  | 'timeline'
+  | 'image'
+  | 'default'
+
+export const LAYOUTS: readonly SlideLayout[] = [
+  'title',
+  'center',
+  'quote',
+  'columns',
+  'flow',
+  'stats',
+  'versus',
+  'timeline',
+  'image',
+  'default',
+]
 
 export interface Slide {
   /** Stable within a story: annotations are keyed by this. */
@@ -63,7 +86,23 @@ export interface TextEl {
   text: string
 }
 
-export type InkEl = StrokeEl | ArrowEl | ShapeEl | TextEl
+/**
+ * A pasted screenshot. It lives on the ink layer, not in the markdown, so it
+ * floats over the slide without touching the layout — and gets undo, drag and
+ * delete for free like any other annotation.
+ */
+export interface ImageEl {
+  id: string
+  kind: 'image'
+  /** Filename under `Content/Stories/images/`, resolved by the asset server. */
+  src: string
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export type InkEl = StrokeEl | ArrowEl | ShapeEl | TextEl | ImageEl
 
 /** slide.key -> elements */
 export type StoryInk = Record<string, InkEl[]>

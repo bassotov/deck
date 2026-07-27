@@ -105,10 +105,11 @@ body {
 }
 
 .slide-fit {
+  --gap: 3cqh;
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 3cqh;
+  gap: var(--gap);
   transform-origin: center top;
 }
 
@@ -321,7 +322,7 @@ body {
 /* -------------------------------------------------------------- columns */
 
 .slide[data-layout='columns'] .slide-fit {
-  gap: 5cqh;
+  --gap: 5cqh;
 }
 
 .cols {
@@ -380,6 +381,312 @@ body {
   align-self: center;
 }
 
+/* ------------------------------------------------------------------ flow */
+
+/* A left-to-right pipeline. The bars carry the drop-off, the chevrons carry
+   the direction, so the eye reads the shape before it reads a single word. */
+.slide[data-layout='flow'] .slide-fit,
+.slide[data-layout='stats'] .slide-fit,
+.slide[data-layout='versus'] .slide-fit {
+  --gap: 5cqh;
+}
+
+.flow {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.4cqw;
+}
+
+.flow-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1.4cqh;
+  min-width: 0;
+}
+
+.flow-fig {
+  font-family: var(--font-display);
+  font-size: 5.4cqw;
+  line-height: 0.88;
+  letter-spacing: -0.02em;
+  color: var(--color-graphite);
+}
+
+.flow-bar {
+  height: 1cqh;
+  border-radius: 999px;
+  background: rgba(23, 22, 26, 0.07);
+  overflow: hidden;
+}
+
+.flow-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+
+/* A path of words rather than a funnel of numbers — same rail, quieter type. */
+.flow-step[data-text='true'] .flow-fig {
+  font-family: var(--font-body);
+  font-size: 2.2cqw;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+
+.flow-step[data-text='true'] {
+  border-top: 1px solid rgba(23, 22, 26, 0.16);
+  padding-top: 1.8cqh;
+}
+
+.flow:has(.flow-step[data-text='true']) .flow-arrow {
+  margin-top: 3.4cqh;
+}
+
+/* A step that reached zero reads as collapse, not as an accent worth having. */
+.flow-step[data-dead='true'] .flow-fig {
+  color: rgba(23, 22, 26, 0.26);
+}
+
+.flow-step[data-dead='true'] .flow-bar > span {
+  background: rgba(23, 22, 26, 0.14);
+}
+
+.flow-label,
+.stat-label {
+  color: var(--color-muted);
+}
+
+.flow-label p,
+.flow-label li,
+.stat-label p,
+.stat-label li {
+  font-size: 1.45cqw;
+  line-height: 1.4;
+}
+
+.flow-arrow {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-top: 2.1cqw;
+}
+
+.flow-arrow::before {
+  content: '';
+  display: block;
+  width: 1cqw;
+  height: 1cqw;
+  border-top: 2px solid rgba(23, 22, 26, 0.2);
+  border-right: 2px solid rgba(23, 22, 26, 0.2);
+  transform: rotate(45deg);
+}
+
+/* ----------------------------------------------------------------- stats */
+
+.stats {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 3cqw;
+  align-items: start;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2cqh;
+  border-top: 1px solid rgba(23, 22, 26, 0.16);
+  padding-top: 1.8cqh;
+  min-width: 0;
+}
+
+.stat-fig {
+  font-family: var(--font-display);
+  font-size: 6.2cqw;
+  line-height: 0.86;
+  letter-spacing: -0.022em;
+  color: var(--color-graphite);
+}
+
+/* Bold the heading (`### **+25**`) to make one number the point of the slide. */
+.stat[data-key='true'] {
+  border-top-color: var(--color-accent);
+}
+
+.stat[data-key='true'] .stat-fig,
+.flow-step[data-key='true'] .flow-fig {
+  color: var(--color-accent);
+}
+
+/* ---------------------------------------------------------------- versus */
+
+/* The guess is provisional, so it is drawn provisionally. What happened is
+   solid and carries the accent rule. */
+.vs {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 3cqw;
+  align-items: stretch;
+}
+
+.vs-pane {
+  border-radius: 12px;
+  padding: 2.6cqh 2.2cqw;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6cqh;
+  min-width: 0;
+}
+
+.vs-pane[data-side='a'] {
+  border: 0.08cqw dashed rgba(23, 22, 26, 0.2);
+}
+
+.vs-pane[data-side='b'] {
+  border: 0.12cqw solid var(--color-accent);
+}
+
+.vs-pane h3 {
+  font-family: var(--font-mono);
+  font-size: 1.15cqw;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-weight: 400;
+}
+
+.vs-pane[data-side='a'] h3 {
+  color: var(--color-dimmer);
+}
+
+.vs-pane[data-side='b'] h3 {
+  color: var(--color-accent);
+}
+
+.vs-pane p,
+.vs-pane li {
+  font-size: 1.8cqw;
+  line-height: 1.4;
+}
+
+.vs-pane ul,
+.vs-pane ol {
+  gap: 1.1cqh;
+}
+
+.vs-pane li {
+  padding-left: 2.6cqw;
+}
+
+.vs-pane ul > li::before {
+  width: 1.4cqw;
+}
+
+/* -------------------------------------------------------------- timeline */
+
+.slide ul.tl {
+  position: relative;
+  gap: 2.2cqh;
+}
+
+/* The rail sits behind the dots and stops short of both ends. */
+.slide ul.tl::before {
+  content: '';
+  position: absolute;
+  left: 0.87cqw;
+  top: 1.4cqh;
+  bottom: 1.4cqh;
+  width: 1px;
+  background: rgba(23, 22, 26, 0.13);
+}
+
+.slide ul.tl > li {
+  display: flex;
+  align-items: baseline;
+  gap: 1.2cqw;
+  padding-left: 3.4cqw;
+}
+
+.slide ul.tl > li::before {
+  left: 0.35cqw;
+  top: 0.44em;
+  width: 1.1cqw;
+  height: 1.1cqw;
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+
+/* The last beat is where the story goes quiet — hollow it out. */
+.slide ul.tl > li:last-child::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px rgba(23, 22, 26, 0.24);
+}
+
+.tl-when {
+  flex: 0 0 9cqw;
+  font-family: var(--font-mono);
+  font-size: 1.2cqw;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-graphite);
+}
+
+.tl-what {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ----------------------------------------------------------------- image */
+
+/* Full-bleed screenshot. An explicit size opts back out of the crop. */
+.slide[data-layout='image'] {
+  padding: 0;
+}
+
+.slide[data-layout='image'] .slide-fit {
+  height: 100%;
+  gap: 0;
+}
+
+.slide[data-layout='image'] img:not(.sized) {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: cover;
+  border-radius: 0;
+  align-self: stretch;
+}
+
+/* marked wraps a lone image in a paragraph. Make that wrapper transparent so
+   the width and alignment land on the image and not on dead paragraph box. */
+.slide p:has(> img:only-child) {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+.slide[data-layout='image'] p:has(> img:only-child) {
+  height: 100%;
+}
+
+/* Sized images win over every container default, including a column's — but
+   still stop at the container edge, because the stage clips what overflows. */
+.slide img.sized {
+  max-height: none;
+  height: auto;
+  object-fit: contain;
+}
+
+.slide img.al-center {
+  align-self: center;
+}
+
+.slide img.al-right {
+  align-self: flex-end;
+}
+
 /* The handwritten accent — `<span class="hand">…</span>` in a storyline. */
 .slide .hand {
   font-family: var(--font-hand);
@@ -397,7 +704,12 @@ body {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--color-accent);
-  margin-bottom: 1.6cqh;
+}
+
+/* An eyebrow belongs to the heading under it, so it cancels the stack gap and
+   sits at a fixed distance no matter which layout set that gap. */
+.slide p:has(> .eyebrow:only-child) {
+  margin-bottom: calc(1.6cqh - var(--gap));
 }
 
 /* ------------------------------------------------------------- ink layer */
@@ -459,6 +771,25 @@ body {
 
 .ink-highlight {
   mix-blend-mode: multiply;
+}
+
+/* Selection chrome is UI, not content — it must not read as part of the slide. */
+.ink-selection {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 2;
+  stroke-dasharray: 9 7;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.ink-handle {
+  fill: var(--color-paper);
+  stroke: var(--color-accent);
+  stroke-width: 2;
+  pointer-events: all;
+  cursor: nwse-resize;
+  vector-effect: non-scaling-stroke;
 }
 
 /* ----------------------------------------------------------- transitions */

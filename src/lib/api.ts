@@ -26,6 +26,28 @@ export async function createStory(slug: string, raw: string): Promise<void> {
   if (!res.ok) throw new Error(`create: ${res.status}`)
 }
 
+/** Reads as a data URL so the bytes survive JSON — `data:image/png;base64,AAA…` */
+function toBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('could not read the image'))
+    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '')
+    reader.readAsDataURL(blob)
+  })
+}
+
+/** Stores the image beside the deck and returns its filename. */
+export async function addImage(slug: string, blob: Blob): Promise<string> {
+  const res = await fetch('/api/image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug, mime: blob.type, data: await toBase64(blob) }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.error ?? `image: ${res.status}`)
+  return body.name as string
+}
+
 export async function fetchInk(slug: string): Promise<StoryInk> {
   const res = await fetch(`/api/ink/${encodeURIComponent(slug)}`)
   if (!res.ok) return {}

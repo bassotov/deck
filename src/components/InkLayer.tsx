@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { InkEl, ShapeKind, TextEl, Tool } from '../types'
+import type { ImageEl, InkEl, ShapeKind, TextEl, Tool } from '../types'
 import {
   STAGE_H,
   STAGE_W,
   TOOL_SIZE,
   arrowToPath,
+  boundsOf,
   hitsElement,
+  resizeImage,
   shapeToPath,
   snapAngle,
   squareOff,
@@ -25,6 +27,8 @@ interface Props {
   tool: Tool
   shape: ShapeKind
   color: string
+  selectedId: string | null
+  onSelect: (id: string | null) => void
   onCommit: (el: InkEl) => void
   onUpdate: (el: InkEl) => void
   onErase: (ids: string[]) => void
@@ -52,6 +56,18 @@ function TextElement({ el }: { el: TextEl }) {
 }
 
 function Visual({ el }: { el: InkEl }) {
+  if (el.kind === 'image') {
+    return (
+      <image
+        href={`/stories-assets/${encodeURIComponent(el.src)}`}
+        x={el.x}
+        y={el.y}
+        width={el.w}
+        height={el.h}
+        preserveAspectRatio="xMidYMid meet"
+      />
+    )
+  }
   if (el.kind === 'arrow' || el.kind === 'shape') {
     return (
       <path
@@ -75,14 +91,33 @@ function Visual({ el }: { el: InkEl }) {
   )
 }
 
+/** Corner grip on a selected image, in stage units. */
+const HANDLE = 26
+
+const SELECT_PAD = 8
+
+function Selection({ el }: { el: InkEl }) {
+  const b = boundsOf(el)
+  return (
+    <rect
+      className="ink-selection"
+      x={b.x - SELECT_PAD}
+      y={b.y - SELECT_PAD}
+      width={b.w + SELECT_PAD * 2}
+      height={b.h + SELECT_PAD * 2}
+      rx={6}
+    />
+  )
+}
+
 /**
  * An invisible, fatter copy of the element so a 7px line is still easy to grab
  * with a trackpad. Closed shapes hit-test on their outline only, so a rectangle
  * drawn around content doesn't swallow clicks meant for the slide underneath.
  */
 function HitArea({ el }: { el: InkEl }) {
-  if (el.kind === 'text') {
-    const b = textBox(el)
+  if (el.kind === 'text' || el.kind === 'image') {
+    const b = el.kind === 'text' ? textBox(el) : el
     return <rect x={b.x} y={b.y} width={b.w} height={b.h} fill="none" pointerEvents="all" />
   }
   if (el.kind === 'arrow' || el.kind === 'shape') {
@@ -113,6 +148,8 @@ export default function InkLayer({
   tool,
   shape,
   color,
+  selectedId,
+  onSelect,
   onCommit,
   onUpdate,
   onErase,
@@ -127,6 +164,7 @@ export default function InkLayer({
   const [dragTo, setDragTo] = useState<[number, number] | null>(null)
   const [editing, setEditing] = useState<{ x: number; y: number; value: string } | null>(null)
   const [drag, setDrag] = useState<{ id: string; dx: number; dy: number } | null>(null)
+  const [sizing, setSizing] = useState<{ id: string; w: number; h: number } | null>(null)
   const dragFrom = useRef<[number, number]>([0, 0])
 
   const active = tool !== 'cursor'
@@ -285,6 +323,7 @@ export default function InkLayer({
     e.preventDefault()
     e.currentTarget.setPointerCapture(e.pointerId)
     dragFrom.current = toStage(e.clientX, e.clientY)
+    onSelect(el.id)
     setDrag({ id: el.id, dx: 0, dy: 0 })
   }
 
@@ -308,10 +347,54 @@ export default function InkLayer({
     setDrag(null)
   }
 
+  /* ------------------------------------------------------------- resizing */
+
+  /** The element as it was when the grip was grabbed — the drag is measured
+   *  against this, never against the size it is currently being dragged to. */
+  const sizeFrom = useRef<ImageEl | null>(null)
+  const grabOffset = useRef(0)
+
+  const onSizeDown = (e: React.PointerEvent<SVGRectElement>, el: ImageEl) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    const [x] = toStage(e.clientX, e.clientY)
+    sizeFrom.current = el
+    // Grabbing the grip slightly off-centre shouldn't snap the corner to the cursor.
+    grabOffset.current = x - (el.x + el.w)
+    setSizing({ id: el.id, w: el.w, h: el.h })
+  }
+
+  const onSizeMove = (e: React.PointerEvent<SVGRectElement>) => {
+    const from = sizeFrom.current
+    if (!sizing || !from) return
+    const [x] = toStage(e.clientX, e.clientY)
+    setSizing({ id: from.id, ...resizeImage(from, x - grabOffset.current) })
+  }
+
+  const onSizeUp = (e: React.PointerEvent<SVGRectElement>) => {
+    const from = sizeFrom.current
+    if (!sizing || !from) return
+    e.currentTarget.releasePointerCapture?.(e.pointerId)
+    const { w, h } = sizing
+    sizeFrom.current = null
+    setSizing(null)
+    if (w !== from.w) onUpdate({ ...from, w, h })
+  }
+
+  /** Images sit behind the vector ink, so a drawing is never hidden by a paste. */
+  const ordered = useMemo(
+    () => [...elements].sort((a, b) => Number(a.kind !== 'image') - Number(b.kind !== 'image')),
+    [elements],
+  )
+
   const committed = useMemo(
     () =>
-      elements.map((el) => {
+      ordered.map((el) => {
         const moving = drag?.id === el.id ? drag : null
+        const live = sizing?.id === el.id && el.kind === 'image' ? { ...el, ...sizing } : el
+        const selected = selecting && selectedId === el.id
         return (
           <g
             key={el.id}
@@ -322,13 +405,30 @@ export default function InkLayer({
             onPointerUp={selecting ? (e) => onElUp(e, el) : undefined}
             onPointerCancel={selecting ? (e) => onElUp(e, el) : undefined}
           >
-            <Visual el={el} />
-            {selecting && <HitArea el={el} />}
+            <Visual el={live} />
+            {selecting && <HitArea el={live} />}
+            {selected && <Selection el={live} />}
+            {/* The grip renders at the live size but drives off the committed
+                element, so one drag is one resize rather than a feedback loop. */}
+            {selected && el.kind === 'image' && live.kind === 'image' && (
+              <rect
+                className="ink-handle"
+                x={live.x + live.w - HANDLE / 2}
+                y={live.y + live.h - HANDLE / 2}
+                width={HANDLE}
+                height={HANDLE}
+                rx={3}
+                onPointerDown={(e) => onSizeDown(e, el)}
+                onPointerMove={onSizeMove}
+                onPointerUp={onSizeUp}
+                onPointerCancel={onSizeUp}
+              />
+            )}
           </g>
         )
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [elements, selecting, drag],
+    [ordered, selecting, selectedId, drag, sizing],
   )
 
   const scale = pxPerUnit()
