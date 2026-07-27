@@ -1,38 +1,59 @@
 import { useRef, useState } from 'react'
-import type { ImageEl, InkEl } from '../types'
-import { boundsOf, boxFromDrag, boxesIntersect, resizeImage, translateEl } from '../lib/ink'
+import type { Box, InkEl } from '../types'
+import type { Handle } from '../lib/ink'
+import {
+  boundsOf,
+  boundsOfMany,
+  boxFromDrag,
+  boxesIntersect,
+  resizeBox,
+  scaleEl,
+  translateEl,
+} from '../lib/ink'
 
 /**
- * Dragging an element and resizing an image are mutually exclusive — one
+ * Dragging a selection and resizing it are mutually exclusive — one
  * discriminated union so the type system enforces that rather than discipline.
+ * A resize carries the two boxes rather than a size, because that pair is
+ * exactly what `scaleEl` maps every kind of element through.
  */
 export type Interaction =
   | { mode: 'idle' }
   | { mode: 'dragging'; ids: string[]; dx: number; dy: number }
-  | { mode: 'resizing'; id: string; w: number; h: number }
+  | { mode: 'resizing'; ids: string[]; from: Box; to: Box }
 
 const IDLE: Interaction = { mode: 'idle' }
+
+/**
+ * The scaled copy a live resize shows, or the element untouched. A drag previews
+ * with a `<g transform>` instead (cheaper for a long freehand path), but a
+ * resize can't: a transform would stretch a font's glyphs and skew a stroke's
+ * width, where `scaleEl` moves the font size and the width themselves.
+ */
+export function resizePreview(el: InkEl, interaction: Interaction): InkEl {
+  return interaction.mode === 'resizing' && interaction.ids.includes(el.id)
+    ? scaleEl(el, interaction.from, interaction.to)
+    : el
+}
 
 interface Args {
   selecting: boolean
   elements: InkEl[]
   selectedIds: string[]
   onSelect: (ids: string[]) => void
-  onUpdate: (el: InkEl) => void
-  /** Batch commit — a group drag moves several elements but must land as one
-   *  history entry, whether the group has one member or ten. */
+  /** Batch commit — a group drag or resize touches several elements but must
+   *  land as one history entry, whether the group has one member or ten. */
   onUpdateMany: (els: InkEl[]) => void
   toStage: (clientX: number, clientY: number) => [number, number]
 }
 
 /** Existing-element manipulation for the cursor tool: drag to move (solo or as a
- *  group), grip to resize, marquee to select on empty canvas. */
+ *  group), handles to resize, marquee to select on empty canvas. */
 export function useSelectionInteraction({
   selecting,
   elements,
   selectedIds,
   onSelect,
-  onUpdate,
   onUpdateMany,
   toStage,
 }: Args) {
@@ -111,38 +132,60 @@ export function useSelectionInteraction({
 
   /* ------------------------------------------------------------- resizing */
 
-  /** The element as it was when the grip was grabbed — the drag is measured
-   *  against this, never against the size it is currently being dragged to. */
-  const sizeFrom = useRef<ImageEl | null>(null)
-  const grabOffset = useRef(0)
+  /** The gesture as it was when the grip was grabbed: which handle, the box the
+   *  selection filled then, and where inside the grip the pointer landed. Every
+   *  frame is measured against this, never against the box it is being dragged
+   *  to — see `resizeBox` for why that distinction is load-bearing. */
+  const sizeFrom = useRef<{ grip: Handle; box: Box; ids: string[]; grab: [number, number] } | null>(
+    null,
+  )
 
-  const onSizeDown = (e: React.PointerEvent<SVGRectElement>, el: ImageEl) => {
+  const onHandleDown = (e: React.PointerEvent<SVGRectElement>, grip: Handle) => {
     if (e.button !== 0) return
     e.stopPropagation()
     e.preventDefault()
     e.currentTarget.setPointerCapture(e.pointerId)
-    const [x] = toStage(e.clientX, e.clientY)
-    sizeFrom.current = el
-    // Grabbing the grip slightly off-centre shouldn't snap the corner to the cursor.
-    grabOffset.current = x - (el.x + el.w)
-    setInteraction({ mode: 'resizing', id: el.id, w: el.w, h: el.h })
+    const ids = selectedIds.filter((id) => elements.some((el) => el.id === id))
+    if (!ids.length) return
+    const box = boundsOfMany(elements.filter((el) => ids.includes(el.id)))
+    const [x, y] = toStage(e.clientX, e.clientY)
+    sizeFrom.current = {
+      grip,
+      box,
+      ids,
+      // The grips sit on the padded outline, and nobody grabs one dead centre.
+      // Both offsets are captured once, so they shift the drag without ever
+      // accumulating into it.
+      grab: [x - (box.x + grip.fx * box.w), y - (box.y + grip.fy * box.h)],
+    }
+    setInteraction({ mode: 'resizing', ids, from: box, to: box })
   }
 
-  const onSizeMove = (e: React.PointerEvent<SVGRectElement>) => {
+  const onHandleMove = (e: React.PointerEvent<SVGRectElement>) => {
     const from = sizeFrom.current
     if (interaction.mode !== 'resizing' || !from) return
-    const [x] = toStage(e.clientX, e.clientY)
-    setInteraction({ mode: 'resizing', id: from.id, ...resizeImage(from, x - grabOffset.current) })
+    const [x, y] = toStage(e.clientX, e.clientY)
+    const to = resizeBox(from.box, from.grip, [x - from.grab[0], y - from.grab[1]], {
+      aspect: e.shiftKey,
+      fromCenter: e.altKey,
+    })
+    setInteraction({ mode: 'resizing', ids: from.ids, from: from.box, to })
   }
 
-  const onSizeUp = (e: React.PointerEvent<SVGRectElement>) => {
+  const onHandleUp = (e: React.PointerEvent<SVGRectElement>) => {
     const from = sizeFrom.current
     if (interaction.mode !== 'resizing' || !from) return
     e.currentTarget.releasePointerCapture?.(e.pointerId)
-    const { w, h } = interaction
+    const { to } = interaction
     sizeFrom.current = null
     setInteraction(IDLE)
-    if (w !== from.w) onUpdate({ ...from, w, h })
+    // One commit for the whole gesture — the live preview was throwaway, so the
+    // resize lands as a single undo entry however many elements it scaled.
+    if (to.w !== from.box.w || to.h !== from.box.h || to.x !== from.box.x || to.y !== from.box.y) {
+      onUpdateMany(
+        elements.filter((el) => from.ids.includes(el.id)).map((el) => scaleEl(el, from.box, to)),
+      )
+    }
   }
 
   /* -------------------------------------------------------------- marquee */
@@ -198,9 +241,9 @@ export function useSelectionInteraction({
     onElDown,
     onElMove,
     onElUp,
-    onSizeDown,
-    onSizeMove,
-    onSizeUp,
+    onHandleDown,
+    onHandleMove,
+    onHandleUp,
     marqueeBox,
     onBackdropDown,
     onBackdropMove,

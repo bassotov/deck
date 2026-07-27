@@ -806,6 +806,16 @@ body {
   vector-effect: non-scaling-stroke;
 }
 
+/* Each member of a multi-selection. The box around the whole group keeps the
+   prominent outline above; drawing the members at that same weight turned three
+   selected elements into a busy segmented strip of near-identical boxes, with
+   nothing to say which one was the group. */
+.ink-selection.ink-selection-member {
+  stroke-width: 1;
+  stroke-opacity: 0.45;
+  stroke-dasharray: 4 6;
+}
+
 /* The marquee itself, while it's being dragged out — solid, unlike the dashed
    `.ink-selection`, so "actively drawing a marquee" reads differently from
    "already selected". The fill alpha matches the shell's atmosphere wash. */
@@ -817,13 +827,39 @@ body {
   vector-effect: non-scaling-stroke;
 }
 
+/* The eight resize grips. Purely visual: the transparent rect behind each one
+   takes the pointer, so the square can stay small without being fiddly. */
 .ink-handle {
   fill: var(--color-paper);
   stroke: var(--color-accent);
   stroke-width: 2;
-  pointer-events: all;
-  cursor: nwse-resize;
+  pointer-events: none;
   vector-effect: non-scaling-stroke;
+}
+
+/* The grab target — roughly double the grip, invisible, the same slack HitArea
+   gives a 7px line so a trackpad can still catch it. It carries the cursor
+   because it is what the pointer is actually over. */
+.ink-handle-hit {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;
+}
+
+.ink-handle-hit[data-axis='nwse'] {
+  cursor: nwse-resize;
+}
+
+.ink-handle-hit[data-axis='nesw'] {
+  cursor: nesw-resize;
+}
+
+.ink-handle-hit[data-axis='ns'] {
+  cursor: ns-resize;
+}
+
+.ink-handle-hit[data-axis='ew'] {
+  cursor: ew-resize;
 }
 
 /* ----------------------------------------------------------- transitions */

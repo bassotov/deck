@@ -13,7 +13,7 @@ import { HitArea, Visual } from './ink/ElementView'
 import SelectionOverlay from './ink/SelectionOverlay'
 import TextEditor, { useTextEditor } from './ink/TextEditor'
 import { useInkDrawing } from '../hooks/useInkDrawing'
-import { useSelectionInteraction } from '../hooks/useSelectionInteraction'
+import { resizePreview, useSelectionInteraction } from '../hooks/useSelectionInteraction'
 
 const ERASER_CURSOR =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ccircle cx='13' cy='13' r='10' fill='rgba(0,0,0,0.06)' stroke='%2317161A' stroke-width='1.4'/%3E%3C/svg%3E\") 13 13, auto"
@@ -26,14 +26,11 @@ interface Props {
   selectedIds: string[]
   onSelect: (ids: string[]) => void
   onCommit: (el: InkEl) => void
-  onUpdate: (el: InkEl) => void
-  /** Batch commit for a group drag — every moved element lands as one undo entry. */
+  /** Batch commit for a group drag or resize — every element it touched lands as
+   *  one undo entry. */
   onUpdateMany: (els: InkEl[]) => void
   onErase: (ids: string[]) => void
 }
-
-/** Corner grip on a selected image, in stage units. */
-const HANDLE = 26
 
 export default function InkLayer({
   elements,
@@ -43,7 +40,6 @@ export default function InkLayer({
   selectedIds,
   onSelect,
   onCommit,
-  onUpdate,
   onUpdateMany,
   onErase,
 }: Props) {
@@ -90,9 +86,9 @@ export default function InkLayer({
     onElDown,
     onElMove,
     onElUp,
-    onSizeDown,
-    onSizeMove,
-    onSizeUp,
+    onHandleDown,
+    onHandleMove,
+    onHandleUp,
     marqueeBox,
     onBackdropDown,
     onBackdropMove,
@@ -102,7 +98,6 @@ export default function InkLayer({
     elements,
     selectedIds,
     onSelect,
-    onUpdate,
     onUpdateMany,
     toStage,
   })
@@ -118,11 +113,9 @@ export default function InkLayer({
       ordered.map((el) => {
         const moving =
           interaction.mode === 'dragging' && interaction.ids.includes(el.id) ? interaction : null
-        const live =
-          interaction.mode === 'resizing' && interaction.id === el.id && el.kind === 'image'
-            ? { ...el, w: interaction.w, h: interaction.h }
-            : el
-        const selected = selecting && selectedIds.includes(el.id)
+        // A live resize renders scaled but still drives off the committed
+        // element, so one drag is one resize rather than a feedback loop.
+        const live = resizePreview(el, interaction)
         return (
           <g
             key={el.id}
@@ -135,24 +128,9 @@ export default function InkLayer({
           >
             <Visual el={live} />
             {selecting && <HitArea el={live} />}
-            {/* The selection outline itself is drawn by SelectionOverlay, as one
-                block on top of every element — see its render below. */}
-            {/* The grip renders at the live size but drives off the committed
-                element, so one drag is one resize rather than a feedback loop. */}
-            {selected && el.kind === 'image' && live.kind === 'image' && (
-              <rect
-                className="ink-handle"
-                x={live.x + live.w - HANDLE / 2}
-                y={live.y + live.h - HANDLE / 2}
-                width={HANDLE}
-                height={HANDLE}
-                rx={3}
-                onPointerDown={(e) => onSizeDown(e, el)}
-                onPointerMove={onSizeMove}
-                onPointerUp={onSizeUp}
-                onPointerCancel={onSizeUp}
-              />
-            )}
+            {/* The selection outline and its resize grips are drawn by
+                SelectionOverlay, as one block on top of every element — see its
+                render below. */}
           </g>
         )
       }),
@@ -197,7 +175,14 @@ export default function InkLayer({
         )}
         {committed}
         {selecting && (
-          <SelectionOverlay elements={elements} selectedIds={selectedIds} interaction={interaction} />
+          <SelectionOverlay
+            elements={elements}
+            selectedIds={selectedIds}
+            interaction={interaction}
+            onHandleDown={onHandleDown}
+            onHandleMove={onHandleMove}
+            onHandleUp={onHandleUp}
+          />
         )}
         {marqueeBox && (
           <rect

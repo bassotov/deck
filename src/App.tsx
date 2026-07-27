@@ -286,8 +286,6 @@ export default function App() {
 
   const commit = useCallback((el: InkEl) => commitMany([el]), [commitMany])
 
-  const update = useCallback((el: InkEl) => updateMany([el]), [updateMany])
-
   const erase = useCallback(
     (ids: string[]) => {
       if (!slide) return
@@ -670,7 +668,6 @@ export default function App() {
                   selectedIds={selectedIds}
                   onSelect={setSelectedIds}
                   onCommit={commit}
-                  onUpdate={update}
                   onUpdateMany={updateMany}
                   onErase={erase}
                 />

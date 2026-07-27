@@ -235,12 +235,85 @@ export function scaleEl(el: InkEl, from: Box, to: Box): InkEl {
   }
 }
 
+/* --------------------------------------------------------------- handles */
+
+/**
+ * The eight grips on a selection box, as fractions of it. A fraction of 0.5 on
+ * an axis means that axis is pinned — which is the whole difference between a
+ * corner handle (resizes both) and an edge handle (resizes one). `axis` names
+ * the resize cursor the grip wears.
+ */
+export const HANDLES = [
+  { pos: 'nw', fx: 0, fy: 0, axis: 'nwse' },
+  { pos: 'n', fx: 0.5, fy: 0, axis: 'ns' },
+  { pos: 'ne', fx: 1, fy: 0, axis: 'nesw' },
+  { pos: 'e', fx: 1, fy: 0.5, axis: 'ew' },
+  { pos: 'se', fx: 1, fy: 1, axis: 'nwse' },
+  { pos: 's', fx: 0.5, fy: 1, axis: 'ns' },
+  { pos: 'sw', fx: 0, fy: 1, axis: 'nesw' },
+  { pos: 'w', fx: 0, fy: 0.5, axis: 'ew' },
+] as const
+
+export type Handle = (typeof HANDLES)[number]
+
+/**
+ * Smallest a selection may be dragged to, on either axis, in stage units — small
+ * enough to be a deliberate size, large enough that the grips stay grabbable.
+ * Clamped here rather than inside `scaleEl`, which stays pure geometry.
+ */
+export const RESIZE_MIN = 12
+
+/**
+ * The box a handle drag has pulled the selection into. The pointer is read
+ * directly against a fixed anchor — never against the box's current size, since
+ * deltas measured against a size that is itself changing compound into a
+ * runaway drag. (That lesson predates this function; it cost an afternoon.)
+ *
+ * `aspect` (Shift) locks the original ratio; `fromCenter` (Alt) pins the centre
+ * instead of the opposite edge, so both sides move together.
+ */
+export function resizeBox(
+  from: Box,
+  grip: Handle,
+  [px, py]: [number, number],
+  mod: { aspect: boolean; fromCenter: boolean },
+): Box {
+  // What the drag pulls against: the opposite edge/corner, or the centre.
+  const anchorX = mod.fromCenter ? from.x + from.w / 2 : from.x + (1 - grip.fx) * from.w
+  const anchorY = mod.fromCenter ? from.y + from.h / 2 : from.y + (1 - grip.fy) * from.h
+  // From the centre, the pointer only ever covers half the box — so it counts double.
+  const reach = mod.fromCenter ? 2 : 1
+
+  const freeX = grip.fx !== 0.5
+  const freeY = grip.fy !== 0.5
+  // Clamped, not mirrored: dragging past the anchor parks the box at its minimum
+  // rather than flipping it inside out, which no one has ever meant to do.
+  let w = freeX ? Math.max(RESIZE_MIN, (px - anchorX) * (grip.fx === 1 ? 1 : -1) * reach) : from.w
+  let h = freeY ? Math.max(RESIZE_MIN, (py - anchorY) * (grip.fy === 1 ? 1 : -1) * reach) : from.h
+
+  // A degenerate box — a perfectly horizontal line — has no ratio to lock.
+  if (mod.aspect && from.w > 0 && from.h > 0) {
+    // Uniform scale off whichever axis was pulled furthest. An edge handle has
+    // only one, which is exactly what makes Shift meaningful there too.
+    const s = Math.max(freeX ? w / from.w : 0, freeY ? h / from.h : 0)
+    w = Math.max(RESIZE_MIN, from.w * s)
+    h = Math.max(RESIZE_MIN, from.h * s)
+  }
+
+  return {
+    // How much of the new box sits before the anchor: all of it when the anchor
+    // is the far edge, none when it's the near one, half when it's the centre.
+    x: anchorX - w * (mod.fromCenter ? 0.5 : 1 - grip.fx),
+    y: anchorY - h * (mod.fromCenter ? 0.5 : 1 - grip.fy),
+    w,
+    h,
+  }
+}
+
 /* ---------------------------------------------------------------- images */
 
 /** The box a pasted image is fitted into, in stage units. */
 const IMAGE_FIT = { w: 700, h: 520 }
-
-export const IMAGE_MIN = 80
 
 /**
  * Centre a pasted image, scaled to fit. Successive pastes on one slide cascade
@@ -252,17 +325,6 @@ export function placeImage(natural: { w: number; h: number }, nth: number) {
   const h = Math.round(natural.h * scale)
   const step = (nth % 5) * 46
   return { x: Math.round((STAGE_W - w) / 2) + step, y: Math.round((STAGE_H - h) / 2) + step, w, h }
-}
-
-/**
- * Resize from the bottom-right corner, keeping the aspect ratio. The corner
- * tracks the pointer directly rather than accumulating deltas — deltas measured
- * against a size that is itself changing compound into a runaway drag.
- */
-export function resizeImage(from: { x: number; w: number; h: number }, cornerX: number) {
-  const ratio = from.h / from.w
-  const w = Math.max(IMAGE_MIN, cornerX - from.x)
-  return { w: Math.round(w), h: Math.round(w * ratio) }
 }
 
 /** Bounding box of any element, for drawing the selection outline. */

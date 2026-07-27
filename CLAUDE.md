@@ -109,6 +109,14 @@ to one axis. Each element carries an invisible fatter hit area so a 7px line is 
 grabbable on a trackpad; closed shapes hit-test on their outline only, so a rectangle
 drawn around content doesn't swallow clicks meant for the slide.
 
+A selection — one element or ten — wears eight resize grips: four corners (both axes)
+and four edge midpoints (one axis). Shift locks the aspect, Option resizes from the
+centre. Everything scales, including text, whose font size follows the box the Keynote
+way; there is no text wrapping in this format, so nothing else could sensibly mean
+"bigger". The grips sit in the padding ring outside the outline and never reach into
+the element's own area, so a small mark stays draggable rather than fenced in by its
+own handles. No rotation: marks are drawn at their final angle in one gesture.
+
 `⇧1–4` colour · `C` cycles colour · Shift while drawing snaps to a straight line
 `←/→`, space, scroll — navigate · `⌘Z`/`⇧⌘Z` undo/redo · `X` clear slide
 `⌘B` sidebar · `F` focus mode · `Esc` out
