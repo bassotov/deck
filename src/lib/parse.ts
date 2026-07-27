@@ -1,6 +1,6 @@
 import { marked } from 'marked'
 import { LAYOUTS, type Slide, type SlideLayout, type Story } from '../types'
-import { DIRECTIVE, SLIDE_BREAK } from './slides'
+import { DIRECTIVE, splitSlides } from './slides'
 
 marked.setOptions({ gfm: true, breaks: false })
 
@@ -58,6 +58,15 @@ function readImageParams(params: string[]) {
   return { alt: alt.join(' '), hash: query ? `#${query}` : '' }
 }
 
+/**
+ * Encode a raw path/URL the way `encodeURI` would, but leave it alone if it
+ * already looks percent-encoded (`%20`, …) — re-encoding that would turn the
+ * `%` itself into `%25` and corrupt an already-valid destination.
+ */
+function encodeSrcIfNeeded(src: string): string {
+  return /%[0-9a-fA-F]{2}/.test(src) ? src : encodeURI(src)
+}
+
 /** Obsidian embeds (`![[chart.png|600]]`) and relative paths both resolve against
  *  the vault, which the dev server serves under /stories-assets. */
 function resolveAssets(md: string): string {
@@ -71,13 +80,20 @@ function resolveAssets(md: string): string {
     },
   )
 
-  // Plain-markdown form carries its size in the alt slot: `![alt|60%](shot.png)`
-  return wiki.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt: string, src: string) => {
-    if (!alt.includes('|')) return m
-    const parts = alt.split('|')
-    const { alt: text, hash } = readImageParams(parts.slice(1))
-    return `![${[parts[0].trim(), text].filter(Boolean).join(' ')}](${src}${hash})`
-  })
+  // Plain-markdown form carries its size in the alt slot: `![alt|60%](shot.png)`.
+  // The destination may be a bare token or the `<...>` angle-bracket form,
+  // and — unlike the old `[^)\s]+` capture — may contain spaces, since a
+  // hand-typed `![alt](my photo.png)` is a real path, not a broken one.
+  return wiki.replace(
+    /!\[([^\]]*)\]\((?:<([^<>]*)>|([^)]+))\)/g,
+    (_m, alt: string, angleSrc: string | undefined, bareSrc: string | undefined) => {
+      const src = encodeSrcIfNeeded((angleSrc ?? bareSrc ?? '').trim())
+      if (!alt.includes('|')) return `![${alt}](${src})`
+      const parts = alt.split('|')
+      const { alt: text, hash } = readImageParams(parts.slice(1))
+      return `![${[parts[0].trim(), text].filter(Boolean).join(' ')}](${src}${hash})`
+    },
+  )
 }
 
 function rewriteImageSrc(html: string): string {
@@ -272,7 +288,7 @@ function slideKey(heading: string | null, index: number, taken: Set<string>): st
 }
 
 export function parseStory(slug: string, raw: string, mtime: number): Story {
-  const blocks = raw.split(SLIDE_BREAK)
+  const blocks = splitSlides(raw)
   const taken = new Set<string>()
 
   const slides: Slide[] = blocks

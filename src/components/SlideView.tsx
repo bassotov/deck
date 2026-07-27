@@ -18,10 +18,19 @@ export default function SlideView({ slide }: { slide: Slide }) {
 
     const raf = requestAnimationFrame(() => {
       const style = getComputedStyle(slideEl)
-      const available =
+      const availableH =
         slideEl.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
-      const needed = fit.scrollHeight
-      if (needed > available + 1) setScale(Math.max(0.5, available / needed))
+      const availableW =
+        slideEl.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+      const neededH = fit.scrollHeight
+      const neededW = fit.scrollWidth
+      // A slide can fit vertically but still overflow on one too-wide line (a
+      // URL, a long hashtag, a wide code sample) — take whichever axis needs
+      // the smaller scale so nothing gets clipped by `.slide { overflow: hidden }`.
+      const ratioH = neededH > availableH + 1 ? availableH / neededH : 1
+      const ratioW = neededW > availableW + 1 ? availableW / neededW : 1
+      const ratio = Math.min(ratioH, ratioW)
+      if (ratio < 1) setScale(Math.max(0.5, ratio))
     })
     return () => cancelAnimationFrame(raf)
   }, [slide.key, slide.html])

@@ -121,6 +121,18 @@ body {
 
 /* ------------------------------------------------------ slide typography */
 
+/* Baseline safety net: shrink-to-fit measures both axes now, but a URL, long
+   hashtag, or wide code sample should wrap rather than lean on scaling alone
+   (and rather than get silently clipped by `.slide { overflow: hidden }`). */
+.slide h1,
+.slide h2,
+.slide h3,
+.slide p,
+.slide li,
+.slide blockquote {
+  overflow-wrap: anywhere;
+}
+
 .slide h1,
 .slide h2,
 .slide h3 {

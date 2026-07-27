@@ -4,6 +4,7 @@ import tailwind from '@tailwindcss/vite'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
+import crypto from 'node:crypto'
 
 /**
  * Storylines live in the Obsidian vault as plain markdown so they stay editable
@@ -122,13 +123,23 @@ async function listStories() {
   const names = (await fs.readdir(STORIES_DIR)).filter(
     (n) => n.endsWith('.md') && !n.startsWith('.'),
   )
-  const stories = await Promise.all(
+  const settled = await Promise.allSettled(
     names.map(async (name) => {
       const file = path.join(STORIES_DIR, name)
       const [raw, stat] = await Promise.all([fs.readFile(file, 'utf8'), fs.stat(file)])
       return { slug: name.replace(/\.md$/, ''), raw, mtime: stat.mtimeMs }
     }),
   )
+
+  // Obsidian saves into this folder while the watcher below triggers a
+  // refetch, so a file mid-write, permission-denied, or deleted between the
+  // readdir and the readFile is routine — skip it rather than taking down
+  // the whole list.
+  const stories: { slug: string; raw: string; mtime: number }[] = []
+  settled.forEach((result, i) => {
+    if (result.status === 'fulfilled') stories.push(result.value)
+    else console.warn(`[stories] skipping ${names[i]}:`, result.reason)
+  })
   return stories.sort((a, b) => b.mtime - a.mtime)
 }
 
@@ -150,9 +161,15 @@ function storiesApi(): Plugin {
             if (!SLUG.test(slug ?? '')) return json(res, 400, { error: 'bad slug' })
             const file = path.join(STORIES_DIR, `${slug}.md`)
             await fs.mkdir(STORIES_DIR, { recursive: true })
-            await fs.writeFile(file, raw ?? '', { flag: 'wx' }).catch((e: any) => {
-              if (e.code !== 'EEXIST') throw e
-            })
+            try {
+              await fs.writeFile(file, raw ?? '', { flag: 'wx' })
+            } catch (e: any) {
+              // `wx` correctly refuses to clobber an existing deck — but silently
+              // swallowing that and returning ok:true had the client navigate into
+              // the existing file believing it just created an empty one.
+              if (e.code === 'EEXIST') return json(res, 409, { ok: false, error: 'exists', slug })
+              throw e
+            }
             return json(res, 200, { ok: true, slug })
           }
 
@@ -184,9 +201,16 @@ function storiesApi(): Plugin {
               const body = (await readBody(req)) || '{}'
               JSON.parse(body) // validate before touching disk
               await fs.mkdir(INK_DIR, { recursive: true })
-              const tmp = `${file}.${process.pid}.tmp`
-              await fs.writeFile(tmp, body)
-              await fs.rename(tmp, file)
+              // Unique per request — two overlapping PUTs for the same slug sharing
+              // one temp path could rename out of order and persist the older save.
+              const tmp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`
+              try {
+                await fs.writeFile(tmp, body)
+                await fs.rename(tmp, file)
+              } catch (err) {
+                await fs.rm(tmp, { force: true }).catch(() => {})
+                throw err
+              }
               return json(res, 200, { ok: true })
             }
           }
