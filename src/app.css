@@ -1,0 +1,507 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-display: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-hand: 'Caveat', 'Bradley Hand', cursive;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+
+  --color-shell: #0f0e0e;
+  --color-panel: #131211;
+  --color-hair: rgba(255, 255, 255, 0.07);
+  --color-dim: #8a8480;
+  --color-dimmer: #5c5854;
+  --color-accent: #ff5a1f;
+
+  --color-paper: #fbf9f6;
+  --color-graphite: #17161a;
+  --color-muted: #5f5952;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-shell);
+  color: #e8e4e0;
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+/* Atmosphere, not flatness: one warm wash + a grain layer over the shell. */
+.shell-atmosphere::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(255, 90, 31, 0.09), transparent 62%),
+    radial-gradient(90% 60% at 50% 110%, rgba(255, 255, 255, 0.035), transparent 60%);
+}
+
+.shell-atmosphere::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.4;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.32'/%3E%3C/svg%3E");
+}
+
+.label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-dimmer);
+}
+
+/* ---------------------------------------------------------------- stage */
+
+.stage {
+  aspect-ratio: 16 / 9;
+  container-type: size;
+  background: var(--color-paper);
+  color: var(--color-graphite);
+  border-radius: 14px;
+  overflow: hidden;
+  position: relative;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.5),
+    0 40px 90px -30px rgba(0, 0, 0, 0.85);
+}
+
+.slide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  /* Default: title on top, content below, air underneath. */
+  justify-content: flex-start;
+  padding: 5.5cqw 6cqw;
+  overflow: hidden;
+}
+
+.slide[data-layout='title'],
+.slide[data-layout='center'],
+.slide[data-layout='quote'] {
+  justify-content: center;
+}
+
+.slide[data-layout='quote'] {
+  align-items: center;
+  text-align: center;
+  padding-inline: 12cqw;
+}
+
+.slide-fit {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3cqh;
+  transform-origin: center top;
+}
+
+.slide[data-layout='title'] .slide-fit,
+.slide[data-layout='center'] .slide-fit,
+.slide[data-layout='quote'] .slide-fit {
+  transform-origin: center center;
+}
+
+/* ------------------------------------------------------ slide typography */
+
+.slide h1,
+.slide h2,
+.slide h3 {
+  color: var(--color-graphite);
+  margin: 0;
+  text-wrap: balance;
+}
+
+.slide h1 {
+  font-family: var(--font-display);
+  font-size: 6.4cqw;
+  line-height: 0.94;
+  letter-spacing: -0.022em;
+  font-weight: 400;
+}
+
+.slide h2 {
+  font-family: var(--font-display);
+  font-size: 5.6cqw;
+  line-height: 0.98;
+  letter-spacing: -0.018em;
+  font-weight: 400;
+}
+
+.slide h3 {
+  font-size: 2.1cqw;
+  line-height: 1.15;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.slide[data-layout='title'] h1 {
+  font-size: 8cqw;
+}
+
+.slide p {
+  font-size: 2cqw;
+  line-height: 1.5;
+  color: var(--color-muted);
+  margin: 0;
+  /* Text runs the full slide width — no measure cap. */
+  max-width: none;
+}
+
+.slide[data-layout='title'] p,
+.slide[data-layout='center'] p {
+  font-size: 2.2cqw;
+}
+
+.slide ul,
+.slide ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5cqh;
+}
+
+.slide li {
+  font-size: 2cqw;
+  line-height: 1.42;
+  color: var(--color-muted);
+  padding-left: 3.4cqw;
+  position: relative;
+  max-width: none;
+}
+
+.slide ul > li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.62em;
+  width: 1.9cqw;
+  height: 2px;
+  background: var(--color-accent);
+  border-radius: 2px;
+}
+
+.slide ol {
+  counter-reset: step;
+}
+
+.slide ol > li {
+  counter-increment: step;
+}
+
+.slide ol > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0.1em;
+  font-family: var(--font-mono);
+  font-size: 1.25cqw;
+  color: var(--color-accent);
+}
+
+.slide li > ul {
+  margin-top: 1cqh;
+}
+
+.slide li > ul > li {
+  font-size: 1.6cqw;
+  color: #837b73;
+}
+
+.slide strong {
+  color: var(--color-graphite);
+  font-weight: 600;
+}
+
+.slide em {
+  font-family: var(--font-display);
+  font-style: italic;
+  color: var(--color-graphite);
+}
+
+.slide blockquote {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 4cqw;
+  line-height: 1.12;
+  letter-spacing: -0.015em;
+  color: var(--color-graphite);
+}
+
+.slide blockquote p {
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  max-width: 26ch;
+  margin-inline: auto;
+}
+
+.slide code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: rgba(23, 22, 26, 0.06);
+  border: 1px solid rgba(23, 22, 26, 0.08);
+  border-radius: 5px;
+  padding: 0.1em 0.34em;
+}
+
+.slide pre {
+  margin: 0;
+  background: #17161a;
+  border-radius: 10px;
+  padding: 2.2cqw;
+  overflow: hidden;
+}
+
+.slide pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #e8e4e0;
+  font-size: 1.35cqw;
+  line-height: 1.6;
+}
+
+.slide img {
+  max-width: 100%;
+  max-height: 52cqh;
+  object-fit: contain;
+  border-radius: 10px;
+  align-self: flex-start;
+}
+
+.slide a {
+  color: var(--color-accent);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255, 90, 31, 0.35);
+}
+
+.slide table {
+  border-collapse: collapse;
+  font-size: 1.6cqw;
+  width: 100%;
+}
+
+.slide th {
+  font-family: var(--font-mono);
+  font-size: 1.05cqw;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-dimmer);
+  text-align: left;
+  font-weight: 400;
+  padding: 0 1.4cqw 0.9cqh 0;
+  border-bottom: 1px solid rgba(23, 22, 26, 0.12);
+}
+
+.slide td {
+  padding: 1cqh 1.4cqw 1cqh 0;
+  border-bottom: 1px solid rgba(23, 22, 26, 0.07);
+  color: var(--color-muted);
+}
+
+/* -------------------------------------------------------------- columns */
+
+.slide[data-layout='columns'] .slide-fit {
+  gap: 5cqh;
+}
+
+.cols {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 3.6cqw;
+  align-items: start;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 1.4cqh;
+  /* A hairline, not a slab — the rule should read as a tick, not a border. */
+  border-top: 1px solid rgba(23, 22, 26, 0.16);
+  padding-top: 1.6cqh;
+}
+
+.col-num {
+  font-family: var(--font-mono);
+  font-size: 1.1cqw;
+  letter-spacing: 0.16em;
+  color: var(--color-accent);
+}
+
+.col h3 {
+  font-size: 2.3cqw;
+  line-height: 1.1;
+}
+
+.col p,
+.col li {
+  font-size: 1.55cqw;
+  line-height: 1.45;
+}
+
+.col ul,
+.col ol {
+  gap: 0.9cqh;
+}
+
+.col li {
+  padding-left: 2.4cqw;
+}
+
+.col ul > li::before {
+  width: 1.3cqw;
+  top: 0.6em;
+}
+
+.col img {
+  width: 100%;
+  max-height: 30cqh;
+  object-fit: contain;
+  align-self: center;
+}
+
+/* The handwritten accent — `<span class="hand">…</span>` in a storyline. */
+.slide .hand {
+  font-family: var(--font-hand);
+  font-weight: 600;
+  color: var(--color-accent);
+  font-size: 1.25em;
+  line-height: 1;
+}
+
+/* An eyebrow above a heading — `<span class="eyebrow">day 42</span>` */
+.slide .eyebrow {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 1.15cqw;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  margin-bottom: 1.6cqh;
+}
+
+/* ------------------------------------------------------------- ink layer */
+
+.ink-layer {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+}
+
+/* Cursor mode: the layer itself lets clicks through to the slide, but each
+   drawn element re-enables events so it can be grabbed and moved. */
+.ink-layer[data-active='false'] {
+  pointer-events: none;
+}
+
+.ink-el {
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.ink-el:active {
+  cursor: grabbing;
+}
+
+.ink-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.ink-svg[data-tool='pen'],
+.ink-svg[data-tool='highlighter'],
+.ink-svg[data-tool='arrow'],
+.ink-svg[data-tool='shape'] {
+  cursor: crosshair;
+}
+
+.ink-svg[data-tool='text'] {
+  cursor: text;
+}
+
+.ink-text-input {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  font-family: var(--font-hand);
+  font-weight: 600;
+  min-width: 14ch;
+  white-space: pre;
+  caret-color: currentColor;
+}
+
+.ink-highlight {
+  mix-blend-mode: multiply;
+}
+
+/* ----------------------------------------------------------- transitions */
+
+.fade-slide {
+  animation: fadeSlide 260ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@keyframes fadeSlide {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-slide {
+    animation: none;
+  }
+}
+
+.rail {
+  transition: opacity 420ms ease;
+}
+
+.rail[data-idle='true'] {
+  opacity: 0.16;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
