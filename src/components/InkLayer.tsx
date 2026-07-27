@@ -5,12 +5,12 @@ import {
   STAGE_W,
   TOOL_SIZE,
   arrowToPath,
-  boundsOf,
   makeStyle,
   shapeToPath,
   strokeToPath,
 } from '../lib/ink'
 import { HitArea, Visual } from './ink/ElementView'
+import SelectionOverlay from './ink/SelectionOverlay'
 import TextEditor, { useTextEditor } from './ink/TextEditor'
 import { useInkDrawing } from '../hooks/useInkDrawing'
 import { useSelectionInteraction } from '../hooks/useSelectionInteraction'
@@ -27,27 +27,13 @@ interface Props {
   onSelect: (ids: string[]) => void
   onCommit: (el: InkEl) => void
   onUpdate: (el: InkEl) => void
+  /** Batch commit for a group drag — every moved element lands as one undo entry. */
+  onUpdateMany: (els: InkEl[]) => void
   onErase: (ids: string[]) => void
 }
 
 /** Corner grip on a selected image, in stage units. */
 const HANDLE = 26
-
-const SELECT_PAD = 8
-
-function Selection({ el }: { el: InkEl }) {
-  const b = boundsOf(el)
-  return (
-    <rect
-      className="ink-selection"
-      x={b.x - SELECT_PAD}
-      y={b.y - SELECT_PAD}
-      width={b.w + SELECT_PAD * 2}
-      height={b.h + SELECT_PAD * 2}
-      rx={6}
-    />
-  )
-}
 
 export default function InkLayer({
   elements,
@@ -58,6 +44,7 @@ export default function InkLayer({
   onSelect,
   onCommit,
   onUpdate,
+  onUpdateMany,
   onErase,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -98,8 +85,27 @@ export default function InkLayer({
       commitText,
     })
 
-  const { interaction, onElDown, onElMove, onElUp, onSizeDown, onSizeMove, onSizeUp } =
-    useSelectionInteraction({ selecting, onSelect, onUpdate, toStage })
+  const {
+    interaction,
+    onElDown,
+    onElMove,
+    onElUp,
+    onSizeDown,
+    onSizeMove,
+    onSizeUp,
+    marqueeBox,
+    onBackdropDown,
+    onBackdropMove,
+    onBackdropUp,
+  } = useSelectionInteraction({
+    selecting,
+    elements,
+    selectedIds,
+    onSelect,
+    onUpdate,
+    onUpdateMany,
+    toStage,
+  })
 
   /** Images sit behind the vector ink, so a drawing is never hidden by a paste. */
   const ordered = useMemo(
@@ -111,7 +117,7 @@ export default function InkLayer({
     () =>
       ordered.map((el) => {
         const moving =
-          interaction.mode === 'dragging' && interaction.id === el.id ? interaction : null
+          interaction.mode === 'dragging' && interaction.ids.includes(el.id) ? interaction : null
         const live =
           interaction.mode === 'resizing' && interaction.id === el.id && el.kind === 'image'
             ? { ...el, w: interaction.w, h: interaction.h }
@@ -124,12 +130,13 @@ export default function InkLayer({
             transform={moving ? `translate(${moving.dx} ${moving.dy})` : undefined}
             onPointerDown={selecting ? (e) => onElDown(e, el) : undefined}
             onPointerMove={selecting ? onElMove : undefined}
-            onPointerUp={selecting ? (e) => onElUp(e, el) : undefined}
-            onPointerCancel={selecting ? (e) => onElUp(e, el) : undefined}
+            onPointerUp={selecting ? onElUp : undefined}
+            onPointerCancel={selecting ? onElUp : undefined}
           >
             <Visual el={live} />
             {selecting && <HitArea el={live} />}
-            {selected && <Selection el={live} />}
+            {/* The selection outline itself is drawn by SelectionOverlay, as one
+                block on top of every element — see its render below. */}
             {/* The grip renders at the live size but drives off the committed
                 element, so one drag is one resize rather than a feedback loop. */}
             {selected && el.kind === 'image' && live.kind === 'image' && (
@@ -169,7 +176,38 @@ export default function InkLayer({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
+        {/* Transparent full-stage backdrop, behind every element and only present
+            in cursor mode — see the .ink-svg[data-tool='cursor'] comment in
+            app.css for why this is what lets a marquee catch drags on empty
+            canvas at all. A click (no drag) on it clears the selection; a real
+            drag draws the marquee, resolved in onBackdropUp. */}
+        {selecting && (
+          <rect
+            x={0}
+            y={0}
+            width={STAGE_W}
+            height={STAGE_H}
+            fill="none"
+            pointerEvents="all"
+            onPointerDown={onBackdropDown}
+            onPointerMove={onBackdropMove}
+            onPointerUp={onBackdropUp}
+            onPointerCancel={onBackdropUp}
+          />
+        )}
         {committed}
+        {selecting && (
+          <SelectionOverlay elements={elements} selectedIds={selectedIds} interaction={interaction} />
+        )}
+        {marqueeBox && (
+          <rect
+            className="ink-marquee"
+            x={marqueeBox.x}
+            y={marqueeBox.y}
+            width={marqueeBox.w}
+            height={marqueeBox.h}
+          />
+        )}
         {points && points.length > 0 && (
           <path
             d={strokeToPath({ points, brush, style: brushStyle })}

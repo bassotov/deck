@@ -309,6 +309,22 @@ export function boundsOfMany(els: InkEl[]): Box {
   }
 }
 
+/** Normalize a free-form drag into an axis-aligned box, whichever corner it started from. */
+export function boxFromDrag(from: [number, number], to: [number, number]): Box {
+  const x = Math.min(from[0], to[0])
+  const y = Math.min(from[1], to[1])
+  return { x, y, w: Math.abs(to[0] - from[0]), h: Math.abs(to[1] - from[1]) }
+}
+
+/**
+ * Whether two boxes overlap at all. The marquee uses intersection rather than
+ * full enclosure — direction-independent and far more forgiving on a trackpad
+ * than requiring every element to be fully inside the drag.
+ */
+export function boxesIntersect(a: Box, b: Box): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+}
+
 /** Rough box around a text element — enough for the eraser to grab it. */
 export function textBox(el: Pick<TextEl, 'x' | 'y' | 'text' | 'fontSize'>): Box {
   const lines = el.text.split('\n')

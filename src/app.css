@@ -732,10 +732,21 @@ body {
   touch-action: none;
 }
 
-/* Cursor mode: the layer itself lets clicks through to the slide, but each
-   drawn element re-enables events so it can be grabbed and moved. */
+/* `data-active` is false only for the cursor tool. This still blocks the
+   *layer div* by default, but it is no longer the last word: cursor mode used
+   to let clicks fall straight through to the slide underneath, back when only
+   individual elements re-enabled events. A marquee needs more than that — it
+   has to catch a drag that starts on empty canvas — so `.ink-svg[data-tool=
+   'cursor']` below re-enables events for the whole SVG, and a transparent
+   backdrop `<rect>` (rendered behind every element, see InkLayer) picks up
+   anything a real element doesn't claim first. The accepted trade: slide HTML
+   underneath is no longer directly clickable while the cursor tool is active. */
 .ink-layer[data-active='false'] {
   pointer-events: none;
+}
+
+.ink-svg[data-tool='cursor'] {
+  pointer-events: auto;
 }
 
 .ink-el {
@@ -791,6 +802,17 @@ body {
   stroke: var(--color-accent);
   stroke-width: 2;
   stroke-dasharray: 9 7;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The marquee itself, while it's being dragged out — solid, unlike the dashed
+   `.ink-selection`, so "actively drawing a marquee" reads differently from
+   "already selected". The fill alpha matches the shell's atmosphere wash. */
+.ink-marquee {
+  fill: rgba(255, 90, 31, 0.09);
+  stroke: var(--color-accent);
+  stroke-width: 1;
   pointer-events: none;
   vector-effect: non-scaling-stroke;
 }

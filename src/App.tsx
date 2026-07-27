@@ -317,6 +317,11 @@ export default function App() {
     clearSelection()
   }, [clearSelection, erase, selectedIds])
 
+  /** ⌘A / Ctrl+A — every element on the current slide. */
+  const selectAll = useCallback(() => {
+    setSelectedIds(slideInk.map((el) => el.id))
+  }, [slideInk])
+
   // A selection can't outlive the slide it was made on.
   useEffect(clearSelection, [clearSelection, slide?.key, activeSlug, tool])
 
@@ -456,6 +461,10 @@ export default function App() {
         e.preventDefault()
         return setSidebarOpen((v) => !v)
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        return selectAll()
+      }
       if (e.metaKey || e.ctrlKey || e.altKey) return
 
       // Backspace would otherwise walk the browser back a page.
@@ -534,7 +543,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [clearSlide, deleteSelected, focus, go, pickTool, redo, total, undo])
+  }, [clearSlide, deleteSelected, focus, go, pickTool, redo, selectAll, total, undo])
 
   /* ---------------------------------------------------------------- wheel */
 
@@ -662,6 +671,7 @@ export default function App() {
                   onSelect={setSelectedIds}
                   onCommit={commit}
                   onUpdate={update}
+                  onUpdateMany={updateMany}
                   onErase={erase}
                 />
               )}
