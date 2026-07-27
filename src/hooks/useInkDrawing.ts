@@ -1,0 +1,168 @@
+import { useCallback, useRef, useState } from 'react'
+import type { InkEl, ShapeKind, Tool } from '../types'
+import { TOOL_SIZE, hitsElement, makeStyle, snapAngle, squareOff, uid } from '../lib/ink'
+import type { TextDraft } from '../components/ink/TextEditor'
+
+const ERASER_RADIUS = 16
+
+interface Args {
+  elements: InkEl[]
+  tool: Tool
+  shape: ShapeKind
+  color: string
+  toStage: (clientX: number, clientY: number) => [number, number]
+  onCommit: (el: InkEl) => void
+  onErase: (ids: string[]) => void
+  editing: TextDraft | null
+  setEditing: (next: TextDraft | null) => void
+  commitText: () => void
+}
+
+/** The new-element authoring state and the pointer trio that drives it, for
+ *  every tool except cursor (select & move lives in `useSelectionInteraction`). */
+export function useInkDrawing({
+  elements,
+  tool,
+  shape,
+  color,
+  toStage,
+  onCommit,
+  onErase,
+  editing,
+  setEditing,
+  commitText,
+}: Args) {
+  const drawing = useRef(false)
+  const start = useRef<[number, number]>([0, 0])
+
+  const [points, setPoints] = useState<number[][] | null>(null)
+  const [dragTo, setDragTo] = useState<[number, number] | null>(null)
+
+  const active = tool !== 'cursor'
+
+  /** The nib a freehand stroke draws with, and the style it commits with. The
+   *  highlighter's dimming belongs to the nib — nothing reads it back the other way. */
+  const brush: 'pen' | 'highlighter' = tool === 'highlighter' ? 'highlighter' : 'pen'
+  const brushStyle = makeStyle({
+    stroke: color,
+    strokeWidth: TOOL_SIZE[brush],
+    opacity: brush === 'highlighter' ? 0.32 : 1,
+  })
+
+  const erase = useCallback(
+    (x: number, y: number) => {
+      const hits = elements.filter((el) => hitsElement(el, x, y, ERASER_RADIUS)).map((el) => el.id)
+      if (hits.length) onErase(hits)
+    },
+    [elements, onErase],
+  )
+
+  const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!active || e.button !== 0) return
+    e.preventDefault()
+
+    // A click outside an open text box commits it rather than starting a new one.
+    if (editing) return commitText()
+
+    const [x, y] = toStage(e.clientX, e.clientY)
+    start.current = [x, y]
+
+    if (tool === 'text') return setEditing({ x, y, value: '' })
+
+    e.currentTarget.setPointerCapture(e.pointerId)
+    drawing.current = true
+
+    if (tool === 'eraser') return erase(x, y)
+    if (tool === 'arrow' || tool === 'shape') return setDragTo([x, y])
+    setPoints([[x, y, e.pressure || 0.5]])
+  }
+
+  const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!drawing.current) return
+    const [x, y] = toStage(e.clientX, e.clientY)
+
+    if (tool === 'eraser') return erase(x, y)
+
+    if (tool === 'arrow') {
+      return setDragTo(e.shiftKey ? snapAngle(start.current, [x, y]) : [x, y])
+    }
+
+    if (tool === 'shape') {
+      if (!e.shiftKey) return setDragTo([x, y])
+      // Shift makes a square/circle, or snaps a line's angle.
+      return setDragTo(
+        shape === 'line' ? snapAngle(start.current, [x, y]) : squareOff(start.current, [x, y]),
+      )
+    }
+
+    // Shift turns the stroke into a straight, angle-snapped line.
+    if (e.shiftKey) {
+      const [sx, sy] = snapAngle(start.current, [x, y])
+      return setPoints([
+        [start.current[0], start.current[1], 0.5],
+        [sx, sy, 0.5],
+      ])
+    }
+
+    const native = e.nativeEvent as PointerEvent
+    const batch = native.getCoalescedEvents?.() ?? [native]
+    setPoints((prev) => {
+      if (!prev) return prev
+      const next = prev.slice()
+      for (const ev of batch) {
+        const [cx, cy] = toStage(ev.clientX, ev.clientY)
+        next.push([cx, cy, ev.pressure || 0.5])
+      }
+      return next
+    })
+  }
+
+  const onPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!drawing.current) return
+    drawing.current = false
+    e.currentTarget.releasePointerCapture?.(e.pointerId)
+
+    if ((tool === 'arrow' || tool === 'shape') && dragTo) {
+      const [x1, y1] = start.current
+      if (Math.hypot(dragTo[0] - x1, dragTo[1] - y1) > 14) {
+        onCommit(
+          tool === 'arrow'
+            ? {
+                id: uid(),
+                kind: 'arrow',
+                style: makeStyle({ stroke: color, strokeWidth: TOOL_SIZE.arrow }),
+                from: start.current,
+                to: dragTo,
+              }
+            : {
+                id: uid(),
+                kind: 'shape',
+                shape,
+                style: makeStyle({ stroke: color, strokeWidth: TOOL_SIZE.shape }),
+                from: start.current,
+                to: dragTo,
+              },
+        )
+      }
+      setDragTo(null)
+      return
+    }
+
+    if (points && points.length > 1 && (tool === 'pen' || tool === 'highlighter')) {
+      onCommit({ id: uid(), kind: 'stroke', brush: tool, style: brushStyle, points })
+    }
+    setPoints(null)
+  }
+
+  return {
+    active,
+    brush,
+    brushStyle,
+    points,
+    dragTo,
+    start,
+    onPointerDown,
+    onPointerMove,
+    onPointerUp,
+  }
+}
