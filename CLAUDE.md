@@ -51,6 +51,38 @@ land while a tool call is in flight, and an `open_deck` that starts a moment lat
 a socket nothing is left to close, so the process would hang forever with the host
 waiting on it.
 
+## Releasing
+
+**Anything shipped needs the npm bump.** deck goes out through three channels and they
+do not sync. Publishing one and not the other is how `npx` starts serving code that is
+weeks behind the repo, which is worse than not shipping at all.
+
+| Channel | Carries | Updated by |
+| --- | --- | --- |
+| npm `@bassotov/deck` | the CLI, and `npx` for every MCP client | `npm publish` |
+| GitHub release `.mcpb` | the Claude Desktop extension | `gh release create` |
+| the repo | source | `git push` |
+
+```bash
+# 1. bump the version in package.json — npm versions are immutable, so a
+#    published number can never be replaced, only superseded or deprecated
+npm run typecheck && npm run build
+npm publish --access public          # prompts for a 2FA code
+
+# 2. the extension carries its own copy of lib/ and dist/, so it is stale the
+#    moment the package is not
+npm run bundle
+gh release create vX.Y.Z build/deck-X.Y.Z.mcpb --title "…" --notes-file …
+```
+
+The MCP server reports `readPackageVersion()`, so a forgotten bump shows up as a client
+announcing the wrong version rather than as an error. `prepublishOnly` runs the
+typecheck and build, so a stale `dist/` cannot be published by accident.
+
+`files` must keep carrying `PRIVACY.md`, `SECURITY.md` and `THIRD-PARTY-LICENSES.md`.
+The tarball ships the bundled woff2 files, and the OFL requires their notices to travel
+with them.
+
 ## The two builds
 
 | | Project | In | Out |
