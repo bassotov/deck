@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin, type ViteDevServer } from 'vite'
+import { defineConfig, loadEnv, type Plugin, type ViteDevServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwind from '@tailwindcss/vite'
 import fs from 'node:fs/promises'
@@ -6,28 +6,42 @@ import path from 'node:path'
 import os from 'node:os'
 import crypto from 'node:crypto'
 
-/**
- * Storylines live in the Obsidian vault as plain markdown so they stay editable
- * in Obsidian and tracked in the graph. This app only reads them.
- * Override with STORIES_DIR=/some/path npm run dev
- */
-const STORIES_DIR = process.env.STORIES_DIR
-  ? path.resolve(process.env.STORIES_DIR)
-  : path.join(os.homedir(), 'Documents/PashaOS/Content/Stories')
+/** `.env.local` is read here as well as from the environment, so a personal
+ *  content folder can be configured once instead of on every command. */
+const fileEnv = loadEnv(process.env.NODE_ENV || 'development', process.cwd(), '')
+const env = (...names: string[]) =>
+  names.map((n) => process.env[n] ?? fileEnv[n]).find((v) => v)
 
-/** Annotations live in a dot-folder so Obsidian ignores them. */
+/** A shell expands `~` in `DECKS_DIR=~/notes npm run dev`; a `.env.local` line
+ *  does not, and `path.resolve` would then make a literal `~` folder. */
+const resolveDir = (dir: string) =>
+  path.resolve(dir.startsWith('~/') ? path.join(os.homedir(), dir.slice(2)) : dir)
+
+/**
+ * Storylines are plain markdown, kept outside the app so they stay editable in
+ * whatever you already write in — a notes app, an editor, a synced folder. The
+ * bundled `decks/` folder is only the default. This app never writes to a `.md`.
+ *
+ *   DECKS_DIR=~/Notes/Decks npm run dev
+ */
+const STORIES_DIR = resolveDir(env('DECKS_DIR', 'STORIES_DIR') ?? 'decks')
+
+/** Annotations live in a dot-folder so note apps and finders ignore them. */
 const INK_DIR = path.join(STORIES_DIR, '.ink')
 
 /**
  * Obsidian resolves `![[shot.png]]` by name across the whole vault, and it drops
  * pasted screenshots wherever the attachment setting points — which is not this
- * folder. Serving the vault (read-only, images only) means a paste just works.
+ * folder. Point ASSET_ROOT at the vault and an embed by bare name just works.
+ *
+ * It defaults to the decks folder itself: widening the search is opt-in, since
+ * the fallback walks the tree and the parent of a decks folder can be anything.
  */
-const VAULT_DIR = (() => {
-  const guess = process.env.VAULT_DIR
-    ? path.resolve(process.env.VAULT_DIR)
-    : path.resolve(STORIES_DIR, '..', '..')
-  return STORIES_DIR.startsWith(guess + path.sep) ? guess : STORIES_DIR
+const ASSET_ROOT = (() => {
+  const root = env('ASSET_ROOT', 'VAULT_DIR')
+  if (!root) return STORIES_DIR
+  const resolved = resolveDir(root)
+  return STORIES_DIR.startsWith(resolved + path.sep) ? resolved : STORIES_DIR
 })()
 
 const SLUG = /^[a-z0-9][a-z0-9._-]*$/i
@@ -85,7 +99,7 @@ const SKIP_DIRS = new Set(['node_modules', '.git', '.obsidian', '.trash'])
 let imageIndex = new Map<string, string>()
 let indexedAt = 0
 
-async function indexVaultImages() {
+async function indexAssetRoot() {
   const found = new Map<string, string>()
   const walk = async (dir: string, depth: number) => {
     if (depth > 8) return
@@ -98,11 +112,11 @@ async function indexVaultImages() {
         found.set(entry.name, full)
     }
   }
-  await walk(VAULT_DIR, 0)
+  await walk(ASSET_ROOT, 0)
   return found
 }
 
-/** Alongside the deck first, then `images/`, then anywhere in the vault by name. */
+/** Alongside the deck first, then `images/`, then anywhere under ASSET_ROOT by name. */
 async function resolveAsset(rel: string): Promise<string | null> {
   for (const candidate of [path.join(STORIES_DIR, rel), path.join(STORIES_DIR, 'images', rel)]) {
     if (!candidate.startsWith(STORIES_DIR + path.sep)) continue
@@ -111,11 +125,11 @@ async function resolveAsset(rel: string): Promise<string | null> {
 
   const name = path.basename(rel)
   if (!imageIndex.has(name) && Date.now() - indexedAt > 5_000) {
-    imageIndex = await indexVaultImages()
+    imageIndex = await indexAssetRoot()
     indexedAt = Date.now()
   }
   const hit = imageIndex.get(name)
-  return hit?.startsWith(VAULT_DIR + path.sep) ? hit : null
+  return hit?.startsWith(ASSET_ROOT + path.sep) ? hit : null
 }
 
 async function listStories() {
@@ -131,7 +145,7 @@ async function listStories() {
     }),
   )
 
-  // Obsidian saves into this folder while the watcher below triggers a
+  // An editor saves into this folder while the watcher below triggers a
   // refetch, so a file mid-write, permission-denied, or deleted between the
   // readdir and the readFile is routine — skip it rather than taking down
   // the whole list.
@@ -221,7 +235,8 @@ function storiesApi(): Plugin {
         }
       })
 
-      // Images referenced from a slide, resolved the way Obsidian resolves them.
+      // Images referenced from a slide, resolved the way Obsidian resolves them:
+      // by bare name, wherever the file actually sits.
       server.middlewares.use(async (req, res, next) => {
         const url = (req.url ?? '').split('?')[0]
         if (!url.startsWith('/stories-assets/')) return next()
@@ -243,7 +258,7 @@ function storiesApi(): Plugin {
         }
       })
 
-      // Live-reload the deck when a storyline changes in Obsidian.
+      // Live-reload the deck when a storyline changes on disk.
       server.watcher.add(STORIES_DIR)
       const hot: any = (server as any).hot ?? server.ws
       const notify = (file: string) => {

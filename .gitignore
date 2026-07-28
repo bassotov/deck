@@ -3,3 +3,10 @@ dist
 .DS_Store
 *.log
 .vite
+
+# Personal content folder, pointed at with DECKS_DIR
+.env.local
+.env.*.local
+
+# Annotations on the bundled example decks — scratch, not source
+decks/.ink/

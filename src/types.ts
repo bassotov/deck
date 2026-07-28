@@ -118,7 +118,7 @@ export interface TextEl {
 export interface ImageEl {
   id: string
   kind: 'image'
-  /** Filename under `Content/Stories/images/`, resolved by the asset server. */
+  /** Filename under the decks folder's `images/`, resolved by the asset server. */
   src: string
   /** Only `opacity` means anything here; the rest exists so every element is uniform. */
   style: ElStyle

@@ -68,7 +68,7 @@ function encodeSrcIfNeeded(src: string): string {
 }
 
 /** Obsidian embeds (`![[chart.png|600]]`) and relative paths both resolve against
- *  the vault, which the dev server serves under /stories-assets. */
+ *  the decks folder, which the dev server serves under /stories-assets. */
 function resolveAssets(md: string): string {
   const wiki = md.replace(
     /!\[\[([^\]|]+?)((?:\|[^\]|]*)*)\]\]/g,
