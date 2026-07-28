@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Box, InkEl } from '../types'
 import type { Handle } from '../lib/ink'
 import {
@@ -30,6 +30,11 @@ export type Interaction =
 
 const IDLE: Interaction = { mode: 'idle' }
 
+interface Marquee {
+  from: [number, number]
+  to: [number, number]
+}
+
 /**
  * The scaled copy a live resize shows, or the element untouched. A drag previews
  * with a `<g transform>` instead (cheaper for a long freehand path), but a
@@ -55,9 +60,12 @@ interface Args {
    *  commit rather than the "update" one `onUpdateMany` is. */
   onDuplicateMany: (els: InkEl[]) => void
   toStage: (clientX: number, clientY: number) => [number, number]
-  /** Flags a drag or a handle resize as in flight, so a keyboard tool switch or
-   *  slide change can't land mid-gesture and corrupt it — see the same signal
-   *  from `useInkDrawing` for a stroke. */
+  /** Pointer travel that still reads as a click, in stage units — one definition
+   *  measured against the live stage, shared with InkLayer's double-click test. */
+  clickSlop: () => number
+  /** Flags a drag, a handle resize or a marquee as in flight, so a keyboard tool
+   *  switch or slide change can't land mid-gesture and corrupt it — see the same
+   *  signal from `useInkDrawing` for a stroke. */
   onGestureChange: (active: boolean) => void
 }
 
@@ -71,15 +79,161 @@ export function useSelectionInteraction({
   onUpdateMany,
   onDuplicateMany,
   toStage,
+  clickSlop,
   onGestureChange,
 }: Args) {
-  const [interaction, setInteraction] = useState<Interaction>(IDLE)
+  const [interaction, setInteractionState] = useState<Interaction>(IDLE)
+  /**
+   * The live gesture, mirrored into a ref. The teardown below can be reached
+   * from a window listener rather than from this component's own handler, and
+   * inside that one event the render it closed over is already stale — the ref
+   * is what makes ending a gesture twice a no-op instead of a double commit.
+   */
+  const interactionRef = useRef<Interaction>(IDLE)
+  const setInteraction = useCallback((next: Interaction) => {
+    interactionRef.current = next
+    setInteractionState(next)
+  }, [])
+
   const dragFrom = useRef<[number, number]>([0, 0])
 
   /** Set at pointerdown when Shift/Cmd is held on an element; resolved at
    *  pointerup once we know whether the gesture was a click or a drag — see
-   *  onElUp for why the toggle can't just happen immediately. */
+   *  finishDrag for why the toggle can't just happen immediately. */
   const pendingToggle = useRef<{ id: string; wasSelected: boolean } | null>(null)
+
+  /** The gesture as it was when the grip was grabbed: which handle, the box the
+   *  selection filled then, and where inside the grip the pointer landed. Every
+   *  frame is measured against this, never against the box it is being dragged
+   *  to — see `resizeBox` for why that distinction is load-bearing. */
+  const sizeFrom = useRef<{ grip: Handle; box: Box; ids: string[]; grab: [number, number] } | null>(
+    null,
+  )
+
+  /** The box being dragged out, in stage-space corners — normalized to x/y/w/h
+   *  only at read time, since which corner is "from" depends on drag direction.
+   *  Mirrored into a ref for the same reason `interaction` is. */
+  const [marquee, setMarqueeState] = useState<Marquee | null>(null)
+  const marqueeRef = useRef<Marquee | null>(null)
+  const setMarquee = useCallback((next: Marquee | null) => {
+    marqueeRef.current = next
+    setMarqueeState(next)
+  }, [])
+
+  /** Shift at marquee-start: adds to the existing selection instead of replacing it. */
+  const marqueeAdditive = useRef(false)
+
+  /* ------------------------------------------------------------- teardown */
+
+  /* Each of the three below clears its own state *before* committing, which is
+     what makes it idempotent: the node's own pointerup and the window net below
+     can both fire for one release without landing the gesture twice. */
+
+  const finishDrag = useCallback(() => {
+    const cur = interactionRef.current
+    if (cur.mode !== 'dragging') return
+    setInteraction(IDLE)
+    onGestureChange(false)
+    const { ids, dx, dy, duplicate } = cur
+    const toggle = pendingToggle.current
+    pendingToggle.current = null
+
+    if (Math.hypot(dx, dy) > clickSlop()) {
+      // A real drag: skip the toggle entirely — a drag is not a click, so
+      // Shift's other meaning doesn't apply.
+      const dragged = elements.filter((el) => ids.includes(el.id))
+      // Clamped as one group so a multi-drag keeps its relative layout instead
+      // of each member clamping to a different edge — see `clampDelta`.
+      const [cdx, cdy] = clampDelta(dragged, dx, dy)
+      if (duplicate) {
+        // The originals stay exactly where they were pressed; only the copies
+        // land at the drop point, and they — not the originals — end up selected.
+        const copies = dragged.map((el) => copyEl(el, cdx, cdy))
+        onDuplicateMany(copies)
+        onSelect(copies.map((el) => el.id))
+      } else {
+        onUpdateMany(dragged.map((el) => translateEl(el, cdx, cdy)))
+        // A Shift-drag that started on an element outside the selection moved
+        // that element alone, so the selection has to follow it rather than
+        // stay on marks that never moved.
+        if (toggle && !toggle.wasSelected) onSelect([toggle.id])
+      }
+    } else if (toggle) {
+      onSelect(
+        toggle.wasSelected
+          ? selectedIds.filter((id) => id !== toggle.id)
+          : [...selectedIds, toggle.id],
+      )
+    }
+  }, [
+    clickSlop,
+    elements,
+    onDuplicateMany,
+    onGestureChange,
+    onSelect,
+    onUpdateMany,
+    selectedIds,
+    setInteraction,
+  ])
+
+  const finishResize = useCallback(() => {
+    const cur = interactionRef.current
+    const from = sizeFrom.current
+    if (cur.mode !== 'resizing' || !from) return
+    setInteraction(IDLE)
+    sizeFrom.current = null
+    onGestureChange(false)
+    const { to } = cur
+    // One commit for the whole gesture — the live preview was throwaway, so the
+    // resize lands as a single undo entry however many elements it scaled.
+    if (to.w !== from.box.w || to.h !== from.box.h || to.x !== from.box.x || to.y !== from.box.y) {
+      onUpdateMany(
+        elements.filter((el) => from.ids.includes(el.id)).map((el) => scaleEl(el, from.box, to)),
+      )
+    }
+  }, [elements, onGestureChange, onUpdateMany, setInteraction])
+
+  const finishMarquee = useCallback(() => {
+    const cur = marqueeRef.current
+    if (!cur) return
+    setMarquee(null)
+    onGestureChange(false)
+    const box = boxFromDrag(cur.from, cur.to)
+
+    // Too small to have been a deliberate drag — reads as a plain click on
+    // empty canvas. Only clears when it isn't additive: a stray Shift-click
+    // shouldn't wipe out the selection the user was trying to add to.
+    if (Math.max(box.w, box.h) < 4) {
+      if (!marqueeAdditive.current) onSelect([])
+      return
+    }
+
+    const hits = elements.filter((el) => boxesIntersect(boundsOf(el), box)).map((el) => el.id)
+    onSelect(marqueeAdditive.current ? [...new Set([...selectedIds, ...hits])] : hits)
+  }, [elements, onGestureChange, onSelect, selectedIds, setMarquee])
+
+  /**
+   * A gesture has to be able to end even when the node that was going to report
+   * it is gone: emptying the selection unmounts the grip that holds pointer
+   * capture, and its pointerup then never fires — stranding `onGestureChange`
+   * at `true`, which silently swallows every gesture-locked key for the rest of
+   * the session. The window always survives, so the release is also heard here.
+   * No dependency array on purpose: the teardowns close over this render's
+   * elements and selection, and re-subscribing is cheaper than staleness.
+   */
+  useEffect(() => {
+    const end = () => {
+      finishDrag()
+      finishResize()
+      finishMarquee()
+    }
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+    return () => {
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+    }
+  })
 
   /* ------------------------------------------------------- select & move */
 
@@ -123,7 +277,8 @@ export function useSelectionInteraction({
   }
 
   const onElMove = (e: React.PointerEvent<SVGGElement>) => {
-    if (interaction.mode !== 'dragging') return
+    const cur = interactionRef.current
+    if (cur.mode !== 'dragging') return
     const [x, y] = toStage(e.clientX, e.clientY)
     let dx = x - dragFrom.current[0]
     let dy = y - dragFrom.current[1]
@@ -132,52 +287,16 @@ export function useSelectionInteraction({
       if (Math.abs(dx) >= Math.abs(dy)) dy = 0
       else dx = 0
     }
-    setInteraction((cur) => (cur.mode === 'dragging' ? { ...cur, dx, dy } : cur))
+    setInteraction({ ...cur, dx, dy })
   }
 
   const onElUp = (e: React.PointerEvent<SVGGElement>) => {
-    if (interaction.mode !== 'dragging') return
-    onGestureChange(false)
+    if (interactionRef.current.mode !== 'dragging') return
     e.currentTarget.releasePointerCapture?.(e.pointerId)
-    const { ids, dx, dy, duplicate } = interaction
-    const toggle = pendingToggle.current
-    pendingToggle.current = null
-
-    if (Math.hypot(dx, dy) > 1) {
-      // A real drag: skip the toggle entirely — a drag is not a click, so
-      // Shift's other meaning doesn't apply.
-      const dragged = elements.filter((el) => ids.includes(el.id))
-      // Clamped as one group so a multi-drag keeps its relative layout instead
-      // of each member clamping to a different edge — see `clampDelta`.
-      const [cdx, cdy] = clampDelta(dragged, dx, dy)
-      if (duplicate) {
-        // The originals stay exactly where they were pressed; only the copies
-        // land at the drop point, and they — not the originals — end up selected.
-        const copies = dragged.map((el) => copyEl(el, cdx, cdy))
-        onDuplicateMany(copies)
-        onSelect(copies.map((el) => el.id))
-      } else {
-        onUpdateMany(dragged.map((el) => translateEl(el, cdx, cdy)))
-      }
-    } else if (toggle) {
-      onSelect(
-        toggle.wasSelected
-          ? selectedIds.filter((id) => id !== toggle.id)
-          : [...selectedIds, toggle.id],
-      )
-    }
-    setInteraction(IDLE)
+    finishDrag()
   }
 
   /* ------------------------------------------------------------- resizing */
-
-  /** The gesture as it was when the grip was grabbed: which handle, the box the
-   *  selection filled then, and where inside the grip the pointer landed. Every
-   *  frame is measured against this, never against the box it is being dragged
-   *  to — see `resizeBox` for why that distinction is load-bearing. */
-  const sizeFrom = useRef<{ grip: Handle; box: Box; ids: string[]; grab: [number, number] } | null>(
-    null,
-  )
 
   const onHandleDown = (e: React.PointerEvent<SVGRectElement>, grip: Handle) => {
     if (e.button !== 0) return
@@ -203,7 +322,7 @@ export function useSelectionInteraction({
 
   const onHandleMove = (e: React.PointerEvent<SVGRectElement>) => {
     const from = sizeFrom.current
-    if (interaction.mode !== 'resizing' || !from) return
+    if (interactionRef.current.mode !== 'resizing' || !from) return
     const [x, y] = toStage(e.clientX, e.clientY)
     const to = resizeBox(from.box, from.grip, [x - from.grab[0], y - from.grab[1]], {
       aspect: e.shiftKey,
@@ -213,67 +332,47 @@ export function useSelectionInteraction({
   }
 
   const onHandleUp = (e: React.PointerEvent<SVGRectElement>) => {
-    const from = sizeFrom.current
-    if (interaction.mode !== 'resizing' || !from) return
-    onGestureChange(false)
+    if (interactionRef.current.mode !== 'resizing') return
     e.currentTarget.releasePointerCapture?.(e.pointerId)
-    const { to } = interaction
-    sizeFrom.current = null
-    setInteraction(IDLE)
-    // One commit for the whole gesture — the live preview was throwaway, so the
-    // resize lands as a single undo entry however many elements it scaled.
-    if (to.w !== from.box.w || to.h !== from.box.h || to.x !== from.box.x || to.y !== from.box.y) {
-      onUpdateMany(
-        elements.filter((el) => from.ids.includes(el.id)).map((el) => scaleEl(el, from.box, to)),
-      )
-    }
+    finishResize()
   }
 
   /* -------------------------------------------------------------- marquee */
 
-  /** The box being dragged out, in stage-space corners — normalized to x/y/w/h
-   *  only at read time, since which corner is "from" depends on drag direction. */
-  const [marquee, setMarquee] = useState<{ from: [number, number]; to: [number, number] } | null>(
-    null,
-  )
-  /** Shift at marquee-start: adds to the existing selection instead of replacing it. */
-  const marqueeAdditive = useRef(false)
-
   const onBackdropDown = (e: React.PointerEvent<SVGRectElement>) => {
     if (!selecting || e.button !== 0) return
-    // Stops this from bubbling to `.stage`'s onPointerDown, which clears the
-    // selection unconditionally on any press — that would wipe an additive
-    // (Shift) marquee's starting selection before the drag even begins.
+    // The press belongs to the backdrop: the svg's own pointerdown underneath is
+    // a no-op for the cursor tool, so this is a guard rather than a fix — the
+    // `.stage` onPointerDown it once shielded an additive (Shift) marquee from
+    // no longer exists.
     e.stopPropagation()
     e.currentTarget.setPointerCapture(e.pointerId)
     const p = toStage(e.clientX, e.clientY)
     marqueeAdditive.current = e.shiftKey
     setMarquee({ from: p, to: p })
+    onGestureChange(true)
   }
 
   const onBackdropMove = (e: React.PointerEvent<SVGRectElement>) => {
-    if (!marquee) return
+    if (!marqueeRef.current) return
     const p = toStage(e.clientX, e.clientY)
-    setMarquee((m) => (m ? { ...m, to: p } : m))
+    setMarquee({ ...marqueeRef.current, to: p })
   }
 
   const onBackdropUp = (e: React.PointerEvent<SVGRectElement>) => {
-    if (!marquee) return
+    if (!marqueeRef.current) return
     e.currentTarget.releasePointerCapture?.(e.pointerId)
-    const box = boxFromDrag(marquee.from, marquee.to)
-    setMarquee(null)
-
-    // Too small to have been a deliberate drag — reads as a plain click on
-    // empty canvas. Only clears when it isn't additive: a stray Shift-click
-    // shouldn't wipe out the selection the user was trying to add to.
-    if (Math.max(box.w, box.h) < 4) {
-      if (!marqueeAdditive.current) onSelect([])
-      return
-    }
-
-    const hits = elements.filter((el) => boxesIntersect(boundsOf(el), box)).map((el) => el.id)
-    onSelect(marqueeAdditive.current ? [...new Set([...selectedIds, ...hits])] : hits)
+    finishMarquee()
   }
+
+  // Losing the cursor tool mid-marquee unmounts the backdrop that owns pointer
+  // capture, so nothing resolves the drag: the dashed rect would stay drawn on
+  // the stage — inside the recording crop — for the rest of the session.
+  useEffect(() => {
+    if (selecting || !marqueeRef.current) return
+    setMarquee(null)
+    onGestureChange(false)
+  }, [selecting, setMarquee, onGestureChange])
 
   const marqueeBox = marquee ? boxFromDrag(marquee.from, marquee.to) : null
 

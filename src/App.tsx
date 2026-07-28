@@ -31,9 +31,12 @@ const DUPLICATE_OFFSET = 24
 const NUDGE = 4
 const NUDGE_SHIFT = 20
 
-/** Digit tool-switches, the letter aliases, and slide navigation — ignored
- *  while a gesture (a stroke, a drag, or a handle resize) is in flight, since
- *  switching mid-gesture is exactly what corrupts or destroys it. */
+/** Digit tool-switches, the letter aliases, slide navigation — and the three
+ *  keys that empty the selection — ignored while a gesture (a stroke, a drag, a
+ *  marquee or a handle resize) is in flight, since switching or deleting
+ *  mid-gesture is exactly what corrupts or destroys it. Emptying the selection
+ *  is the worst of them: it unmounts the grip the gesture is being reported
+ *  through, so the release never arrives at all. */
 const GESTURE_LOCKED_KEYS = new Set([
   'v',
   'p',
@@ -51,6 +54,9 @@ const GESTURE_LOCKED_KEYS = new Set([
   'k',
   'home',
   'end',
+  'escape',
+  'backspace',
+  'delete',
 ])
 
 /** A sticky toast stays until it is replaced — a save that failed has to be seen. */
@@ -325,6 +331,14 @@ export default function App() {
    *  step back over the whole pick rather than over each frame of it. */
   const coalescing = useRef<string | null>(null)
 
+  /** Closes the coalescing window. A key that outlives the gesture that opened
+   *  it swallows the next entry whole: the second custom pick would extend the
+   *  first one's entry, and a single ⌘Z would walk back both with no way to
+   *  reach the state between them. */
+  const endCoalescing = useCallback(() => {
+    coalescing.current = null
+  }, [])
+
   const mutate = useCallback(
     (next: (prev: StoryInk) => StoryInk, coalesce?: string) => {
       const prev = inkRef.current
@@ -413,7 +427,21 @@ export default function App() {
   }, [slideInk])
 
   // A selection can't outlive the slide it was made on.
-  useEffect(clearSelection, [clearSelection, slide?.key, activeSlug, tool])
+  useEffect(clearSelection, [clearSelection, slide?.key, activeSlug])
+
+  // Nor a switch to a tool that can't draw it: `SelectionOverlay` renders in
+  // cursor mode only, so a selection held under a drawing tool is invisible
+  // chrome that still eats the arrows and ⌫. Switching *to* cursor keeps what
+  // is selected — that is how ⌘A can arm the cursor tool and select in one go.
+  useEffect(() => {
+    if (tool !== 'cursor') clearSelection()
+  }, [clearSelection, tool])
+
+  // Every edge that ends a gesture also ends its coalescing window: a different
+  // selection, a different slide, a different deck. (A deck load clears `past`
+  // outright, which makes a leaked key worse still — the entry it would extend
+  // isn't even on the stack.)
+  useEffect(endCoalescing, [endCoalescing, selectedIds, slide?.key, activeSlug])
 
   /* ------------------------------------------------------ selection editing */
 
@@ -521,10 +549,11 @@ export default function App() {
       if (!slide || !selected.length) return
       const chosen = new Set(selectedIds)
       const rest = slideInk.filter((el) => !chosen.has(el.id))
-      mutate((prev) => ({
-        ...prev,
-        [slide.key]: toFront ? [...rest, ...selected] : [...selected, ...rest],
-      }))
+      const next = toFront ? [...rest, ...selected] : [...selected, ...rest]
+      // Already there. Pushing an entry for a reorder that moved nothing makes
+      // the next ⌘Z look like it did nothing at all.
+      if (next.every((el, i) => el === slideInk[i])) return
+      mutate((prev) => ({ ...prev, [slide.key]: next }))
     },
     [mutate, selected, selectedIds, slide, slideInk],
   )
@@ -679,13 +708,31 @@ export default function App() {
   // the same screenshot two or three times.
   const adding = useRef(false)
 
+  /** Where the app is *now*, for the async paths that started somewhere else.
+   *  An upload resolves long after the render it began in, and `commitMany`
+   *  writes through `inkRef` live — so what it is about to land in has to be
+   *  read at that moment rather than closed over. */
+  const here = useRef<{ slug: string | null; key: string | null }>({ slug: null, key: null })
+  useEffect(() => {
+    here.current = { slug: activeSlug, key: slide?.key ?? null }
+  }, [activeSlug, slide?.key])
+
   const dropImage = useCallback(
     async (blob: Blob) => {
       if (!activeSlug || !slide || adding.current) return
       adding.current = true
+      const target = { slug: activeSlug, key: slide.key }
       setToast({ text: 'Adding image…' })
       try {
-        const [src, natural] = await Promise.all([addImage(activeSlug, blob), measureImage(blob)])
+        const [src, natural] = await Promise.all([addImage(target.slug, blob), measureImage(blob)])
+        // Moved on while it was uploading. The file is written and the markdown
+        // knows about it, but splicing it in now would put it in whichever deck
+        // is open, under the slide key it was dropped on — a mark in a deck it
+        // was never meant for. The upload keeps its file; the placement doesn't.
+        if (here.current.slug !== target.slug || here.current.key !== target.key) {
+          setToast({ text: `Added ${src} to ${target.slug} — not placed, you moved on` })
+          return
+        }
         const nth = slideInk.filter((el) => el.kind === 'image').length
         // Behind everything: a paste must not hide the drawing it was pasted for.
         commitMany(
@@ -756,6 +803,22 @@ export default function App() {
     gestureActive.current = active
   }, [])
 
+  // Belt and braces. A gesture reports its own end, but it reports it through a
+  // node that can be gone by then, and a flag stranded at `true` silently eats
+  // every key above for the rest of the session. No gesture outlives its
+  // pointer, and the window always sees the release, so it is also cleared here.
+  useEffect(() => {
+    const end = () => {
+      gestureActive.current = false
+    }
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+    return () => {
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+    }
+  }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null
@@ -771,6 +834,11 @@ export default function App() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault()
+        // Taking the whole slide means wanting to work on it, and only the
+        // cursor tool can show or move a selection — under a drawing tool the
+        // chrome never renders, leaving an invisible selection that still eats
+        // the arrows and ⌫. So arm the tool first, then take everything.
+        setTool('cursor')
         return selectAll()
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c') {
@@ -921,6 +989,14 @@ export default function App() {
       const now = performance.now()
       if (now - wheelLock.current < 420) return
       wheelLock.current = now
+      // The keydown handler gets to bail on a focused text box; the wheel has to
+      // deal with it, because a slide change remounts InkLayer and React fires
+      // no blur on unmount — the draft would vanish without ever being written.
+      // Blurring commits it exactly the way clicking away does, first.
+      const focused = document.activeElement
+      if (focused instanceof HTMLElement && (focused.tagName === 'TEXTAREA' || focused.isContentEditable)) {
+        focused.blur()
+      }
       go(e.deltaY > 0 ? 1 : -1)
     },
     [go],
@@ -1051,6 +1127,7 @@ export default function App() {
                     elements={selected}
                     custom={style.custom}
                     onCustom={pickCustom}
+                    onCustomEnd={endCoalescing}
                     onStroke={applyStroke}
                     onFill={applyFill}
                     onWidth={applyWidth}
@@ -1088,6 +1165,7 @@ export default function App() {
             onTool={pickTool}
             onColor={applyStroke}
             onCustom={(c) => pickCustom(c, 'stroke')}
+            onCustomEnd={endCoalescing}
             onUndo={undo}
             onRedo={redo}
             onClear={clearSlide}

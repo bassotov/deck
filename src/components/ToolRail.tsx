@@ -16,6 +16,8 @@ interface Props {
   onTool: (t: Tool) => void
   onColor: (c: string) => void
   onCustom: (c: string) => void
+  /** That pick is over — the OS panel closed. */
+  onCustomEnd: () => void
   onUndo: () => void
   onRedo: () => void
   onClear: () => void
@@ -84,6 +86,7 @@ export default function ToolRail({
   onTool,
   onColor,
   onCustom,
+  onCustomEnd,
   onUndo,
   onRedo,
   onClear,
@@ -129,6 +132,7 @@ export default function ToolRail({
         onChange={(c) => c && onColor(c)}
         custom={custom}
         onCustom={onCustom}
+        onCustomEnd={onCustomEnd}
         vertical
         shortcuts
       />

@@ -7,6 +7,7 @@ import {
   arrowToPath,
   makeStyle,
   shapeToPath,
+  stageSlop,
   strokeToPath,
 } from '../lib/ink'
 import { HitArea, Visual } from './ink/ElementView'
@@ -73,6 +74,15 @@ export default function InkLayer({
   /** Stage units -> CSS pixels, for sizing the live text input. */
   const pxPerUnit = () => (wrapRef.current?.clientWidth ?? STAGE_W) / STAGE_W
 
+  /** The click-vs-drag threshold in stage units, read off the stage as it is
+   *  drawn right now. Defined once here and handed to both the place that
+   *  decides whether a drag happened and the double-click test below, so the
+   *  two can never disagree about what a click is. */
+  const clickSlop = useCallback(
+    () => stageSlop(svgRef.current?.getBoundingClientRect().width ?? STAGE_W),
+    [],
+  )
+
   const { editing, startCreate, startEdit, commitText, updateValue } = useTextEditor({
     style,
     onCommit,
@@ -86,20 +96,30 @@ export default function InkLayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool])
 
-  const { active, brush, brushStyle, points, dragTo, start, onPointerDown, onPointerMove, onPointerUp } =
-    useInkDrawing({
-      elements,
-      tool,
-      shape,
-      style,
-      toStage,
-      onCommit,
-      onErase,
-      editing,
-      startCreate,
-      commitText,
-      onGestureChange,
-    })
+  const {
+    active,
+    brush,
+    brushStyle,
+    points,
+    dragTo,
+    start,
+    erasing,
+    onPointerDown,
+    onPointerMove,
+    onPointerUp,
+  } = useInkDrawing({
+    elements,
+    tool,
+    shape,
+    style,
+    toStage,
+    onCommit,
+    onErase,
+    editing,
+    startCreate,
+    commitText,
+    onGestureChange,
+  })
 
   const {
     interaction,
@@ -121,6 +141,7 @@ export default function InkLayer({
     onUpdateMany,
     onDuplicateMany: onCommitMany,
     toStage,
+    clickSlop,
     onGestureChange,
   })
 
@@ -138,7 +159,8 @@ export default function InkLayer({
     (e: React.PointerEvent<SVGGElement>, el: InkEl) => {
       // Read before onElUp resets `interaction` back to idle.
       const wasClick =
-        interaction.mode === 'dragging' && Math.hypot(interaction.dx, interaction.dy) <= 1
+        interaction.mode === 'dragging' &&
+        Math.hypot(interaction.dx, interaction.dy) <= clickSlop()
       onElUp(e)
       if (!wasClick) {
         // A real drag, however it started — don't let it pair with a click
@@ -154,7 +176,7 @@ export default function InkLayer({
       // reopening the text box on the second one is new behaviour.
       if (isDouble && el.kind === 'text') startEdit(el)
     },
-    [onElUp, interaction, startEdit],
+    [onElUp, interaction, clickSlop, startEdit],
   )
 
   /**
@@ -167,6 +189,10 @@ export default function InkLayer({
   const committed = useMemo(
     () =>
       elements.flatMap((el) => {
+        // Already swept by the eraser but not yet committed: one sweep is one
+        // gesture, so it lands as one history entry at pointer-up — and until
+        // then the mark has to look gone, or the sweep gives no feedback.
+        if (erasing.includes(el.id)) return []
         const dragging =
           interaction.mode === 'dragging' && interaction.ids.includes(el.id) ? interaction : null
         // Option-drag leaves the pressed element exactly where it was — the
@@ -216,7 +242,7 @@ export default function InkLayer({
         ]
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [elements, selecting, selectedIds, interaction, editing],
+    [elements, selecting, selectedIds, interaction, editing, erasing],
   )
 
   const scale = pxPerUnit()

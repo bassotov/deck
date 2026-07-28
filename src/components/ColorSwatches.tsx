@@ -18,6 +18,10 @@ interface Props {
    * caller's cue to treat the whole pick as one gesture.
    */
   onCustom: (c: string) => void
+  /** …and this is where that gesture ends: `change` fires once the OS panel is
+   *  dismissed, `blur` catches the dismissals it doesn't. The caller needs the
+   *  end as much as the stream, or the next pick joins this one's history entry. */
+  onCustomEnd?: () => void
   /** Fill offers ⊘ as a first chip; a stroke always has a colour. */
   allowNone?: boolean
   /** The rail stacks its row; the property bar runs it across. */
@@ -37,6 +41,7 @@ export default function ColorSwatches({
   mixed,
   custom,
   onCustom,
+  onCustomEnd,
   allowNone,
   vertical,
   shortcuts,
@@ -128,6 +133,8 @@ export default function ColorSwatches({
           // inside that panel updating as it happens.
           defaultValue={custom ?? value ?? INK_COLORS[0].value}
           onInput={(e) => onCustom(e.currentTarget.value)}
+          onChange={() => onCustomEnd?.()}
+          onBlur={() => onCustomEnd?.()}
           className="pointer-events-none absolute inset-0 size-full opacity-0"
         />
       </span>

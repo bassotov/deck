@@ -10,6 +10,8 @@ interface Props {
   custom: string | null
   /** ⊕ picked a colour: remember it *and* apply it to whichever field asked. */
   onCustom: (c: string, target: 'stroke' | 'fill') => void
+  /** That pick is over — the OS panel closed. */
+  onCustomEnd: () => void
   onStroke: (c: string) => void
   onFill: (c: string | null) => void
   /** A multiple of each tool's own default width — see `DrawStyle.widthScale`. */
@@ -109,6 +111,7 @@ export default function PropertyBar({
   elements,
   custom,
   onCustom,
+  onCustomEnd,
   onStroke,
   onFill,
   onWidth,
@@ -157,6 +160,7 @@ export default function PropertyBar({
           onChange={(c) => c && onStroke(c)}
           custom={custom}
           onCustom={(c) => onCustom(c, 'stroke')}
+          onCustomEnd={onCustomEnd}
         />
       </Group>
 
@@ -170,6 +174,7 @@ export default function PropertyBar({
               onChange={onFill}
               custom={custom}
               onCustom={(c) => onCustom(c, 'fill')}
+              onCustomEnd={onCustomEnd}
               allowNone
             />
           </Group>

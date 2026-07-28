@@ -455,6 +455,19 @@ export function clampDelta(elements: InkEl[], dx: number, dy: number): [number, 
   return [cx, cy]
 }
 
+/**
+ * How far the pointer may travel and still count as a click rather than a drag.
+ * In CSS pixels, because it is a fact about a hand on a trackpad — not about the
+ * stage, whose units are ~1.5x smaller than a pixel at a typical window size, so
+ * a threshold expressed in them made every real click a drag.
+ */
+export const CLICK_SLOP_PX = 4
+
+/** That slop in stage units, for the stage as it is currently drawn. */
+export function stageSlop(cssWidth: number): number {
+  return CLICK_SLOP_PX * (STAGE_W / (cssWidth || STAGE_W))
+}
+
 /** Normalize a free-form drag into an axis-aligned box, whichever corner it started from. */
 export function boxFromDrag(from: [number, number], to: [number, number]): Box {
   const x = Math.min(from[0], to[0])
