@@ -58,6 +58,8 @@ const manifest = {
   icon: 'icon.png',
   keywords: ['slides', 'presentation', 'markdown', 'deck', 'annotation'],
   license: 'MIT',
+  // Required for a directory listing, and rejected outright if missing.
+  privacy_policies: ['https://github.com/bassotov/deck/blob/main/PRIVACY.md'],
   server: {
     type: 'node',
     entry_point: 'lib/bin/deck.js',
@@ -119,7 +121,7 @@ await fs.mkdir(STAGE, { recursive: true })
 await copyDir(path.join(PKG_ROOT, 'lib'), path.join(STAGE, 'lib'))
 await copyDir(path.join(PKG_ROOT, 'dist'), path.join(STAGE, 'dist'))
 await fs.copyFile(path.join(PKG_ROOT, 'mcpb', 'icon.png'), path.join(STAGE, 'icon.png'))
-for (const doc of ['README.md', 'LICENSE']) {
+for (const doc of ['README.md', 'LICENSE', 'PRIVACY.md']) {
   await fs.copyFile(path.join(PKG_ROOT, doc), path.join(STAGE, doc))
 }
 

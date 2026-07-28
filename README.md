@@ -212,6 +212,12 @@ If you want one of these, open an issue and say so, it genuinely helps me pick.
 - The app never writes to a `.md` you did not ask it to. Annotations and pasted-image placements live beside your decks in `.ink/`, so your markdown stays yours.
 - `CLAUDE.md` in the repo root is the working reference for the internals, including why a lot of the fiddly interaction decisions went the way they did. It is written for an agent but it reads fine as a design doc.
 
+## Privacy Policy
+
+deck collects nothing. No telemetry, no analytics, no account, and **no outbound network requests at all** — the fonts are bundled rather than fetched, so it works with the wifi off. It reads and writes only the decks folder you point it at, the viewer binds to `127.0.0.1`, and it never deletes a deck.
+
+Full policy: [PRIVACY.md](PRIVACY.md).
+
 ## License
 
 MIT

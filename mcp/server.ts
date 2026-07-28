@@ -54,6 +54,11 @@ export function createDeckMcpServer(
   server.registerTool(
     'deck_syntax',
     {
+      annotations: {
+        title: 'Deck syntax reference',
+        readOnlyHint: true,
+        openWorldHint: false,
+      },
       description:
         'The storyline format: how slides are split, every layout and the blocks it expects, the inline accents, speaker notes and image embeds. Read this BEFORE writing or editing a deck — the layouts are not guessable and getting them wrong produces a deck that renders but reads badly.',
       inputSchema: z.object({}),
@@ -64,6 +69,7 @@ export function createDeckMcpServer(
   server.registerTool(
     'list_decks',
     {
+      annotations: { title: 'List decks', readOnlyHint: true, openWorldHint: false },
       description:
         'List every deck in the decks folder, with its title, slide count and slide headings.',
       inputSchema: z.object({}),
@@ -79,6 +85,7 @@ export function createDeckMcpServer(
   server.registerTool(
     'read_deck',
     {
+      annotations: { title: 'Read a deck', readOnlyHint: true, openWorldHint: false },
       description: 'Read one deck as raw markdown.',
       inputSchema: z.object({
         slug: z.string().describe('Filename without .md, e.g. launch-week'),
@@ -96,6 +103,14 @@ export function createDeckMcpServer(
   server.registerTool(
     'write_deck',
     {
+      annotations: {
+        title: 'Write a deck',
+        readOnlyHint: false,
+        // With overwrite:true it replaces an existing file wholesale.
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
       description:
         'Write a whole deck. Creates it if new. Call deck_syntax first if you have not already. Overwriting an existing deck requires overwrite:true, and replaces the entire file — read_deck first if you mean to keep any of it.',
       inputSchema: z.object({
@@ -131,6 +146,14 @@ export function createDeckMcpServer(
   server.registerTool(
     'append_slide',
     {
+      annotations: {
+        title: 'Append a slide',
+        readOnlyHint: false,
+        // Only ever adds to the end; it never rewrites what is already there.
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
       description:
         'Add one slide to the end of an existing deck. Cheaper and safer than rewriting the whole file when you are building a deck up slide by slide.',
       inputSchema: z.object({
@@ -157,6 +180,14 @@ export function createDeckMcpServer(
   server.registerTool(
     'open_deck',
     {
+      annotations: {
+        title: 'Open the viewer',
+        // Starts a local server, so not read-only, but it touches no deck.
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
       description:
         'Start the viewer and return its URL, so a human can look at the deck, present it, or draw on it. Runs until the MCP server stops.',
       inputSchema: z.object({
@@ -179,6 +210,14 @@ export function createDeckMcpServer(
   server.registerTool(
     'export_deck',
     {
+      annotations: {
+        title: 'Export a deck to PNG',
+        readOnlyHint: false,
+        // Writes only into exports/, which is regenerated output.
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
       description:
         'Render a deck to PNG files, annotations included, and return where they were written. Needs Playwright installed (npm i -D playwright && npx playwright install chromium); says so if it is missing.',
       inputSchema: z.object({
