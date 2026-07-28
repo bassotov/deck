@@ -197,7 +197,7 @@ The write path is deliberately careful: `write_deck` will not overwrite an exist
 
 The CLI, the MCP server, the Claude Desktop extension and the npm package all landed. What is left:
 
-- [x] ~~**Publish to npm**~~ — `npx @bassotov/deck` works.
+- [x] ~~**Publish to npm**~~. `npx @bassotov/deck` works.
 - [ ] **A Windows/Linux pass** on the shortcuts, which are written for a Mac keyboard today.
 - [ ] **PDF export** alongside PNG, if anyone wants it.
 
