@@ -15,7 +15,7 @@ interface Args {
   onCommit: (el: InkEl) => void
   onErase: (ids: string[]) => void
   editing: TextDraft | null
-  setEditing: (next: TextDraft | null) => void
+  startCreate: (x: number, y: number) => void
   commitText: () => void
 }
 
@@ -30,7 +30,7 @@ export function useInkDrawing({
   onCommit,
   onErase,
   editing,
-  setEditing,
+  startCreate,
   commitText,
 }: Args) {
   const drawing = useRef(false)
@@ -69,7 +69,7 @@ export function useInkDrawing({
     const [x, y] = toStage(e.clientX, e.clientY)
     start.current = [x, y]
 
-    if (tool === 'text') return setEditing({ x, y, value: '' })
+    if (tool === 'text') return startCreate(x, y)
 
     e.currentTarget.setPointerCapture(e.pointerId)
     drawing.current = true

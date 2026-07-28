@@ -18,6 +18,9 @@ import { resizePreview, useSelectionInteraction } from '../hooks/useSelectionInt
 const ERASER_CURSOR =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ccircle cx='13' cy='13' r='10' fill='rgba(0,0,0,0.06)' stroke='%2317161A' stroke-width='1.4'/%3E%3C/svg%3E\") 13 13, auto"
 
+/** Two clicks on the same element closer together than this count as a double-click. */
+const DOUBLE_CLICK_MS = 400
+
 interface Props {
   elements: InkEl[]
   tool: Tool
@@ -64,7 +67,12 @@ export default function InkLayer({
   /** Stage units -> CSS pixels, for sizing the live text input. */
   const pxPerUnit = () => (wrapRef.current?.clientWidth ?? STAGE_W) / STAGE_W
 
-  const { editing, setEditing, commitText, updateValue } = useTextEditor({ style, onCommit })
+  const { editing, startCreate, startEdit, commitText, updateValue } = useTextEditor({
+    style,
+    onCommit,
+    onUpdateMany,
+    onErase,
+  })
 
   // Switching tool or slide shouldn't strand an open text box.
   useEffect(() => {
@@ -82,7 +90,7 @@ export default function InkLayer({
       onCommit,
       onErase,
       editing,
-      setEditing,
+      startCreate,
       commitText,
     })
 
@@ -108,6 +116,39 @@ export default function InkLayer({
     toStage,
   })
 
+  /** The last element a plain *click* (not a drag) landed on, and when. Read
+   *  and written only at pointer-up, once `onElUp`'s own click-vs-drag call is
+   *  known — pairing at pointerdown instead would treat "click to select, then
+   *  immediately drag from the same point" as a double-click too, since both
+   *  presses land on the same element within the window regardless of what
+   *  the second one turns into. Native `dblclick` isn't an option either:
+   *  `onElDown` preventDefaults the pointerdown, which can suppress the
+   *  compatibility mouse events (click, dblclick) a browser derives from it. */
+  const lastClick = useRef<{ id: string; time: number } | null>(null)
+
+  const onElPointerUp = useCallback(
+    (e: React.PointerEvent<SVGGElement>, el: InkEl) => {
+      // Read before onElUp resets `interaction` back to idle.
+      const wasClick =
+        interaction.mode === 'dragging' && Math.hypot(interaction.dx, interaction.dy) <= 1
+      onElUp(e)
+      if (!wasClick) {
+        // A real drag, however it started — don't let it pair with a click
+        // before or after it.
+        lastClick.current = null
+        return
+      }
+      const now = Date.now()
+      const prior = lastClick.current
+      const isDouble = !!prior && prior.id === el.id && now - prior.time < DOUBLE_CLICK_MS
+      lastClick.current = isDouble ? null : { id: el.id, time: now }
+      // The first click of a double-click still selects normally — only
+      // reopening the text box on the second one is new behaviour.
+      if (isDouble && el.kind === 'text') startEdit(el)
+    },
+    [onElUp, interaction, startEdit],
+  )
+
   /**
    * Plain array order — position *is* z-order, which is what Front/Back move.
    * Images still land behind the vector ink because they are inserted at the
@@ -129,6 +170,10 @@ export default function InkLayer({
         // A live resize renders scaled but still drives off the committed
         // element, so one drag is one resize rather than a feedback loop.
         const live = resizePreview(el, interaction)
+        // The floating textarea is the only rendering of this element while
+        // it's being edited — leaving the committed glyphs in the SVG too
+        // would show doubled text behind it.
+        const beingEdited = editing?.kind === 'edit' && editing.original.id === el.id
         const node = (
           <g
             key={el.id}
@@ -136,10 +181,10 @@ export default function InkLayer({
             transform={moving ? `translate(${moving.dx} ${moving.dy})` : undefined}
             onPointerDown={selecting ? (e) => onElDown(e, el) : undefined}
             onPointerMove={selecting ? onElMove : undefined}
-            onPointerUp={selecting ? onElUp : undefined}
-            onPointerCancel={selecting ? onElUp : undefined}
+            onPointerUp={selecting ? (e) => onElPointerUp(e, el) : undefined}
+            onPointerCancel={selecting ? (e) => onElPointerUp(e, el) : undefined}
           >
-            <Visual el={live} />
+            {!beingEdited && <Visual el={live} />}
             {selecting && <HitArea el={live} />}
             {/* The selection outline and its resize grips are drawn by
                 SelectionOverlay, as one block on top of every element — see its
@@ -163,7 +208,7 @@ export default function InkLayer({
         ]
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [elements, selecting, selectedIds, interaction],
+    [elements, selecting, selectedIds, interaction, editing],
   )
 
   const scale = pxPerUnit()
@@ -177,6 +222,12 @@ export default function InkLayer({
         viewBox={`0 0 ${STAGE_W} ${STAGE_H}`}
         preserveAspectRatio="none"
         style={tool === 'eraser' ? { cursor: ERASER_CURSOR } : undefined}
+        // Commits an open edit before the click underneath it is handled. Can't
+        // rely on the bubble-phase pointerdown below for this: onElDown/
+        // onHandleDown preventDefault the pointerdown, which can suppress the
+        // textarea's blur, so a click straight on another element would
+        // otherwise leave the edit open underneath a fresh drag.
+        onPointerDownCapture={editing ? commitText : undefined}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -262,8 +313,10 @@ export default function InkLayer({
       {editing && (
         <TextEditor
           draft={editing}
-          color={style.stroke}
-          fontSize={style.fontSize}
+          // A fresh mark takes the sticky draw style; reopening a committed one
+          // keeps its own colour and size instead, so editing doesn't reskin it.
+          color={editing.kind === 'edit' ? editing.original.style.stroke : style.stroke}
+          fontSize={editing.kind === 'edit' ? editing.original.fontSize : style.fontSize}
           scale={scale}
           onChange={updateValue}
           onCommit={commitText}
