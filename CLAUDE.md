@@ -7,11 +7,40 @@ this file is the working reference for the internals.
 ## Run it
 
 ```bash
-npm run dev      # http://localhost:5290
+npm run dev                # vite, http://localhost:5290
+node bin/deck.mjs [dir]    # the published CLI path, serving the built app
+node bin/deck.mjs mcp      # the MCP server, on stdio
 ```
 
-Dev-server only by design — the storyline and annotation APIs are Vite middleware
-reading the local filesystem. There is no deployed build.
+## Shape
+
+Three front ends over one core. The rule that makes this work: nothing product-shaped
+lives in `vite.config.ts`, and nothing transport-shaped lives in `server/store.mjs`.
+
+```
+server/config.mjs   where the decks are — argument, then env, then .env file, then ./decks
+server/slides.mjs   the slide grammar. plain JS because all three front ends read decks
+server/store.mjs    every filesystem operation. no HTTP, no MCP
+server/api.mjs      the HTTP surface over a store; returns true when it handled a request
+server/serve.mjs    the standalone server: built app + api + live reload, no Vite
+vite.config.ts      the dev adapter — middleware around the same handler
+bin/deck.mjs        the CLI
+mcp/                the MCP server and the syntax crib it hands to agents
+src/                the React app
+```
+
+Written as `.mjs`, not TypeScript, so the published package needs no build step of its
+own and `files` can ship the sources directly. `src/lib/slides.ts` is a typed re-export
+of `server/slides.mjs`, which is why `allowJs` is on.
+
+**Live reload is server-sent events**, not Vite HMR. The standalone server has no HMR
+channel, and one transport that works in both beats a dev-only path plus a fallback.
+Both servers push the same `decks` event; `src/lib/api.ts#watchDecks` is the only client.
+
+**The store is the security boundary.** Slug validation, the refusal to serve outside
+the asset root, and the refusal to clobber a deck all live there — so the CLI, the dev
+server and the MCP server cannot each get it subtly wrong. `StoreError.status` carries
+the HTTP status the API layer should report.
 
 ## Where things live
 
@@ -24,8 +53,10 @@ reading the local filesystem. There is no deployed build.
 
 The content directory is configurable and expected to live **outside** the repo for
 anyone using this for real: storylines belong wherever they already write, and
-`node_modules` must never land in a notes folder. `DECKS_DIR=/path npm run dev`, or a
-gitignored `.env.local`. `STORIES_DIR` is still read as the old name for it.
+`node_modules` must never land in a notes folder. `deck /path`, `DECKS_DIR=/path npm run
+dev`, or a gitignored `.env.local` — in that order of precedence, so an explicit argument
+is never overridden by an env file that happens to be in the working directory.
+`STORIES_DIR` is still read as the old name for it.
 
 `ASSET_ROOT` widens the by-name image lookup to a parent folder, which is how an
 Obsidian-style `![[shot.png]]` resolves against a whole vault. It defaults to
@@ -34,9 +65,14 @@ folder can be anything.
 
 Annotations go in a dot-folder so note apps and finders ignore them.
 
-Nothing here ever writes to a `.md`. Ink, pasted images and their placement are stored
+**The viewer never writes to a `.md`.** Ink, pasted images and their placement are stored
 beside the deck, never spliced into the source — that is what keeps a storyline editable
-anywhere and safe to keep in someone else's synced folder.
+anywhere and safe to keep in someone else's synced folder. Drawing on a slide cannot
+touch the words on it.
+
+Markdown is only ever written where a person or an agent asked for it by name: `deck new`,
+and the MCP `write_deck` / `append_slide`. `write_deck` refuses to overwrite without an
+explicit flag, and nothing anywhere deletes a deck.
 
 ## The storyline format
 

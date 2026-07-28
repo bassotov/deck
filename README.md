@@ -8,10 +8,15 @@ Write a storyline in markdown. Get a 16:9 deck you can draw on while you record.
 git clone https://github.com/bassotov/deck.git
 cd deck
 npm install
-npm run dev          # http://localhost:5290
+npm run build
+npm link             # puts `deck` on your PATH
+
+deck ~/Notes/Decks   # opens your browser
 ```
 
-That opens the two example decks in `decks/`. Point it somewhere else with `DECKS_DIR`.
+Or `npm run dev` inside the clone, which opens the two example decks in `decks/`.
+
+> Going to npm as `@bassotov/deck` shortly, so this becomes `npx @bassotov/deck ~/Notes/Decks` with no clone at all.
 
 ## What it does
 
@@ -105,7 +110,7 @@ Arrows nudge whatever is selected and only move slides when nothing is. `space`,
 
 ## Configuration
 
-Both are optional. Set them in the shell, or copy them into a `.env.local` (gitignored).
+Both are optional, and both have a CLI flag that wins over them — an explicit `deck ~/notes` is never overridden by an env file left in the working directory. Set them in the shell, or in a `.env.local` (gitignored) next to where you run `deck`.
 
 | | |
 | --- | --- |
@@ -132,19 +137,69 @@ npm run export -- how-deck-works --app  # the whole window, not just the stage
 
 PNGs land in `exports/` at 2×, annotations included. Playwright is not a dependency, because it pulls a browser down on install and you do not need one to run the app.
 
+## The CLI
+
+```bash
+deck [dir]                 serve the decks in dir           (default ./decks)
+deck new <name> [dir]      start a new storyline and open it
+deck export [args…]        render slides to PNG
+deck mcp [dir]             run the MCP server on stdio
+
+  -p, --port <n>           port to serve on                 (default 5290)
+  -h, --host <host>        host to bind                     (default 127.0.0.1)
+      --asset-root <dir>   widen image lookup to this folder
+      --no-open            do not open a browser
+```
+
+It binds to localhost and serves off your own disk. Nothing is uploaded, and there is no account.
+
+## Let an agent write the deck
+
+`deck mcp` is an MCP server, so Claude Code (or anything else speaking MCP) can build a deck for you and you can then open it, fix it, and draw on it. The output is a markdown file you own, not a blob inside someone's product.
+
+```bash
+claude mcp add deck -- deck mcp ~/Notes/Decks
+```
+
+Or by hand, in any MCP client's config:
+
+```json
+{
+  "mcpServers": {
+    "deck": { "command": "deck", "args": ["mcp", "~/Notes/Decks"] }
+  }
+}
+```
+
+| Tool | What it does |
+| --- | --- |
+| `deck_syntax` | The whole format: layouts, the blocks each one expects, accents, notes, images |
+| `list_decks` | Every deck, with titles, slide counts and slide headings |
+| `read_deck` | One deck as raw markdown |
+| `write_deck` | Write a deck. Refuses to clobber unless you pass `overwrite` |
+| `append_slide` | Add one slide to the end, without rewriting the file |
+| `open_deck` | Start the viewer and hand back the URL |
+| `export_deck` | Render to PNG |
+
+`deck_syntax` exists because the layouts are not guessable. An agent that reads it first writes decks that use `stats` and `timeline` properly; one that does not writes eighteen identical bullet slides.
+
+The write path is deliberately careful: `write_deck` will not overwrite an existing deck unless you say so explicitly, and nothing in the MCP surface deletes anything.
+
 ## Where this is going
 
-Right now this is a dev server you run locally, and that is honestly fine for recording. Two things I want next:
+The CLI and the MCP server both landed. What is left:
 
-- [ ] **A CLI.** `npx @bassotov/deck ./my-decks` and it just opens, no clone, no install.
-- [ ] **An MCP server,** so an agent can write and edit the deck itself. Markdown is already the format agents are best at, so "make me a deck about X" should end with a real file on disk you can open and fix, not a proprietary blob behind an API. A free PowerPoint for agents, roughly.
+- [ ] **Publish to npm** so `npx` works with no clone.
+- [ ] **A Windows/Linux pass** on the shortcuts, which are written for a Mac keyboard today.
+- [ ] **PDF export** alongside PNG, if anyone wants it.
 
-Neither exists yet. If you want one of them, open an issue and say so, it genuinely helps me pick.
+If you want one of these, open an issue and say so, it genuinely helps me pick.
 
 ## Notes
 
 - macOS is what this is developed and recorded on. It should run anywhere Node does, but the shortcuts are written for a Mac keyboard.
-- Dev-server only by design. The deck and annotation APIs are Vite middleware reading your local filesystem, so there is no build to deploy and nothing leaves your machine.
+- Everything runs locally. The deck and annotation APIs read and write your own filesystem, and the server binds to `127.0.0.1` unless you tell it otherwise.
+- The app never writes to a `.md` you did not ask it to. Annotations and pasted-image placements live beside your decks in `.ink/`, so your markdown stays yours.
 - `CLAUDE.md` in the repo root is the working reference for the internals, including why a lot of the fiddly interaction decisions went the way they did. It is written for an agent but it reads fine as a design doc.
 
 ## License
