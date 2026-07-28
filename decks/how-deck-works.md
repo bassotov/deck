@@ -1,6 +1,6 @@
-# How storylines work
+# How <span class="hand">deck</span> works
 
-Every file in this folder is one deck. This one explains the format.
+Every file in this folder is one deck. This one explains the format, by being one.
 
 ---
 

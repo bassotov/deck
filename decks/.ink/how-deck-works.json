@@ -1,0 +1,28 @@
+{
+  "h:stats-numbers-do-the-talking": [
+    {
+      "id": "demo-ring",
+      "kind": "shape",
+      "shape": "ellipse",
+      "style": { "stroke": "#FF5A1F", "fill": null, "strokeWidth": 7, "opacity": 1 },
+      "from": [1040, 222],
+      "to": [1282, 344]
+    },
+    {
+      "id": "demo-arrow",
+      "kind": "arrow",
+      "style": { "stroke": "#FF5A1F", "fill": null, "strokeWidth": 8, "opacity": 1 },
+      "from": [792, 508],
+      "to": [1016, 372]
+    },
+    {
+      "id": "demo-label",
+      "kind": "text",
+      "style": { "stroke": "#FF5A1F", "fill": null, "strokeWidth": 0, "opacity": 1 },
+      "fontSize": 54,
+      "x": 404,
+      "y": 486,
+      "text": "this is the whole point"
+    }
+  ]
+}
