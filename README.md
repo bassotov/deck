@@ -2,7 +2,7 @@
 
 Write a storyline in markdown. Get a 16:9 deck you can draw on while you record.
 
-<!-- Drop a screenshot or a short gif here: docs/preview.png -->
+![The deck window: storyline list, the slide stage, the tool rail](docs/app.png)
 
 ```bash
 git clone https://github.com/bassotov/deck.git
@@ -15,12 +15,27 @@ That opens the two example decks in `decks/`. Point it somewhere else with `DECK
 
 ## What it does
 
-- **Markdown in, slides out.** One file is one deck, slides split by `---` on its own line. No binary format, no editor lock-in.
-- **Layouts pick themselves.** A heading alone centres. A blockquote becomes a pull quote. Ask for `columns`, `stats`, `flow`, `timeline` or `versus` by name when you want them.
-- **Draw on the slide while you talk.** Pen, highlighter, arrow, shapes, text, eraser. Vector, not pixels, so marks stay crisp at any window size.
-- **Tuned for a trackpad, not a stylus.** Stroke width comes from velocity, jitter is smoothed hard, and Shift snaps to a straight line.
-- **Paste a screenshot straight onto a slide.** It floats over the slide instead of pushing the text around. Drag it, resize it, undo it.
-- **Marks save themselves,** per slide, and survive a reload.
+**Markdown in, slides out.** One file is one deck, slides split by `---` on its own line. No binary format, no editor lock-in.
+
+![A title slide](docs/title.png)
+
+**Layouts pick themselves.** A heading on its own centres. A blockquote becomes a pull quote. Everything else gets the house shape: title on top, content below, air underneath.
+
+![The columns layout](docs/columns.png)
+
+Ask for `columns`, `stats`, `flow`, `timeline`, `versus` or `image` by name when you want them. They all read the same shape, so learning one teaches you the rest.
+
+![The timeline layout](docs/timeline.png)
+
+**Draw on the slide while you talk.** Pen, highlighter, arrow, shapes, text, eraser. Vector rather than pixels, so a mark stays crisp at any window size and survives a resize.
+
+![An annotated stats slide](docs/stats.png)
+
+**Tuned for a trackpad, not a stylus.** Stroke width comes from velocity, jitter is smoothed hard, and Shift snaps to a straight line.
+
+**Paste a screenshot straight onto a slide.** It floats over the slide instead of pushing the text around. Drag it, resize it, undo it.
+
+**Marks save themselves,** per slide, and survive a reload. The example deck ships with a few on it, so you can see the ink layer before you draw anything.
 
 ## Why I built it
 
@@ -34,7 +49,7 @@ The default slide is title on top, content below, air underneath. Short slides l
 
 ## Write a storyline
 
-`decks/how-storylines-work.md` is the reference deck, and it renders itself. Open the app and read it there.
+`decks/how-deck-works.md` is the reference deck, and it documents the format by being written in it. Open the app and read it there.
 
 The short version:
 
@@ -102,6 +117,20 @@ DECKS_DIR=~/Notes/Decks npm run dev
 ```
 
 Keeping decks outside the repo is the point if you already write in Obsidian, iCloud, or anything synced. The app only ever reads your `.md` files. Annotations go beside them in a `.ink/` dot-folder, and pasted images in `images/`.
+
+## Export to PNG
+
+Every image in this README came out of the deck itself:
+
+```bash
+npm i -D playwright && npx playwright install chromium
+npm run export                          # every slide of every deck
+npm run export -- how-deck-works        # one deck
+npm run export -- how-deck-works 0,7    # particular slides, 0-indexed
+npm run export -- how-deck-works --app  # the whole window, not just the stage
+```
+
+PNGs land in `exports/` at 2×, annotations included. Playwright is not a dependency, because it pulls a browser down on install and you do not need one to run the app.
 
 ## Where this is going
 

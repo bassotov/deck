@@ -64,8 +64,19 @@ three, four — however many you write.
 folder and served by the dev server at `/stories-assets/…`. Generated graphics go in
 `$DECKS_DIR/images/`.
 
-`decks/how-storylines-work.md` is the living reference deck for all of this — it renders
-itself, so update it when the format changes.
+`decks/how-deck-works.md` is the living reference deck for all of this — it renders
+itself, so update it when the format changes. Its committed `.ink/` file is deliberate:
+it demos the ink layer on a first run, and it is what the README screenshots show.
+
+## Export
+
+`npm run export` drives the dev server through Playwright and writes PNGs to `exports/`.
+Playwright is deliberately not a dependency — `npm i -D playwright` when you need it.
+
+Slide count comes from the app, by overshooting the hash index and reading back the
+value it clamps to. Recomputing it here would mean a second `---` splitter, and the
+regex version disagrees with the real one on fenced code blocks — that is, on exactly
+the decks that document the format. The hash is 1-based; the filenames are 0-based.
 
 ## Design
 
