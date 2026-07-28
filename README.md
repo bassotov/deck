@@ -1,6 +1,8 @@
 # deck
 
-Write a storyline in markdown. Get a 16:9 deck you can draw on while you record.
+**PowerPoint for agents.** Your agent writes the deck as plain markdown. You open it and draw on it while you record.
+
+No account, no cloud, no binary format. The deck is a file on your disk that you can edit in any editor, and it stays yours.
 
 ![The deck window: storyline list, the slide stage, the tool rail](docs/app.png)
 
@@ -155,13 +157,21 @@ It binds to localhost and serves off your own disk. Nothing is uploaded, and the
 
 ## Let an agent write the deck
 
-`deck mcp` is an MCP server, so Claude Code (or anything else speaking MCP) can build a deck for you and you can then open it, fix it, and draw on it. The output is a markdown file you own, not a blob inside someone's product.
+`deck mcp` is an MCP server, so Claude (or anything else speaking MCP) can build a deck for you, and you then open it, fix it, and draw on it. The output is a markdown file you own, not a blob inside someone's product.
+
+### Claude Desktop, one click
+
+Grab `deck-x.y.z.mcpb` from [Releases](https://github.com/bassotov/deck/releases), then **Settings → Extensions → Install Extension** and pick it. It asks for the folder your decks live in and that is the whole setup. The bundle carries its own dependencies, so it does not care whether you have ever run npm.
+
+Build one yourself with `npm run bundle`.
+
+### Claude Code
 
 ```bash
 claude mcp add deck -- deck mcp ~/Notes/Decks
 ```
 
-Or by hand, in any MCP client's config:
+### Anything else
 
 ```json
 {
@@ -187,7 +197,7 @@ The write path is deliberately careful: `write_deck` will not overwrite an exist
 
 ## Where this is going
 
-The CLI and the MCP server both landed. What is left:
+The CLI, the MCP server and the Claude Desktop extension all landed. What is left:
 
 - [ ] **Publish to npm** so `npx` works with no clone.
 - [ ] **A Windows/Linux pass** on the shortcuts, which are written for a Mac keyboard today.

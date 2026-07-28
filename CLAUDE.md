@@ -30,7 +30,26 @@ bin/deck.ts        the CLI
 mcp/               the MCP server and the syntax crib it hands to agents
 src/               the React app
 scripts/export.ts  PNG export, driving `serve` through Playwright
+scripts/bundle.ts  the Claude Desktop extension (.mcpb), staged and packed
+mcpb/icon.html     the extension icon's source; the png is rendered from it
 ```
+
+## The extension
+
+`npm run bundle` writes `build/deck-<version>.mcpb` — a zip of `manifest.json`, `lib/`,
+`dist/`, an icon, and a **production-only `node_modules` installed into the staging
+directory**. It has to be self-contained: the host runs `node lib/bin/deck.js mcp`
+directly, with no install step and no guarantee the user has ever run npm.
+
+The decks folder arrives as `DECKS_DIR` from a `user_config` field of type `directory`.
+An optional field the user leaves blank is passed through as the literal string
+`${user_config.asset_root}`, so `resolveConfig` treats any value still containing `${`
+as unset — otherwise it would resolve to a directory with `${` in its name.
+
+`startMcpServer` exits explicitly rather than letting the event loop drain. Shutdown can
+land while a tool call is in flight, and an `open_deck` that starts a moment later binds
+a socket nothing is left to close, so the process would hang forever with the host
+waiting on it.
 
 ## The two builds
 
