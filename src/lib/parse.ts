@@ -239,9 +239,18 @@ const BUILDERS: Partial<Record<SlideLayout, (html: string) => string>> = {
 
 /* ------------------------------------------------------------------ slides */
 
+/**
+ * The heading as plain text. Inline HTML is stripped as well as markdown: a
+ * heading carrying an accent span (`# How <span class="hand">deck</span> works`)
+ * renders fine on the slide, but this string is used raw in the sidebar and the
+ * outline, and it seeds the annotation key — so leaving the tags in printed the
+ * markup at the user and keyed marks to `h:how-span-class-hand-deck-span-works`.
+ */
 function firstHeading(md: string): string | null {
   const m = md.match(/^\s*#{1,3}\s+(.+?)\s*$/m)
-  return m ? m[1].replace(/[*_`]/g, '').trim() : null
+  if (!m) return null
+  const text = m[1].replace(/<[^>]+>/g, '').replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim()
+  return text || null
 }
 
 /** For slides with no heading — quotes, image-only — name them by their words. */
