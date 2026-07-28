@@ -33,7 +33,7 @@ The viewer is a local web server bound to `127.0.0.1` (localhost) by default, re
 
 deck shares your data with no one, because it sends your data nowhere.
 
-One thing worth understanding: when you use deck **through an AI client** such as Claude, and you ask that client to read or write a deck, the deck's contents pass through that client and its model provider. That is the client doing what you asked it to do, under its own privacy policy — deck itself is only reading and writing your local files. Anything you never ask an assistant to open stays on your disk and is never seen by anyone.
+One thing worth understanding: when you use deck **through an AI client** such as Claude, and you ask that client to read or write a deck, the deck's contents pass through that client and its model provider. That is the client doing what you asked it to do, under its own privacy policy. deck itself is only reading and writing your local files. Anything you never ask an assistant to open stays on your disk and is never seen by anyone.
 
 ## Retention
 
@@ -46,6 +46,10 @@ deck is a developer tool and is not directed at children.
 ## Changes
 
 Any change to this policy will be committed to [the repository](https://github.com/bassotov/deck) with its date, and the history is public.
+
+## Status of this project
+
+deck is a personal open-source project, not a commercial product. It is free, there is no company behind it, and nothing is sold. Installing it is your own choice, and it is provided as is, without warranty, under the [MIT License](LICENSE). See the disclaimer in the [README](README.md#disclaimer).
 
 ## Contact
 

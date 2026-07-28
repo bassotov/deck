@@ -2,7 +2,7 @@
 
 deck bundles the typefaces below and redistributes them as `.woff2` files inside
 `dist/`. All four are licensed under the SIL Open Font License 1.1, which requires
-the copyright notice and licence to travel with the font software — that is what
+the copyright notice and licence to travel with the font software. That is what
 this file is for.
 
 The fonts are used unmodified, as packaged by [Fontsource](https://fontsource.org).

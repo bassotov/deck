@@ -112,7 +112,7 @@ Arrows nudge whatever is selected and only move slides when nothing is. `space`,
 
 ## Configuration
 
-Both are optional, and both have a CLI flag that wins over them — an explicit `deck ~/notes` is never overridden by an env file left in the working directory. Set them in the shell, or in a `.env.local` (gitignored) next to where you run `deck`.
+Both are optional, and both have a CLI flag that wins over them. An explicit `deck ~/notes` is never overridden by an env file left in the working directory. Set them in the shell, or in a `.env.local` (gitignored) next to where you run `deck`.
 
 | | |
 | --- | --- |
@@ -214,7 +214,7 @@ If you want one of these, open an issue and say so, it genuinely helps me pick.
 
 ## Privacy Policy
 
-deck collects nothing. No telemetry, no analytics, no account, and **no outbound network requests at all** — the fonts are bundled rather than fetched, so it works with the wifi off. It reads and writes only the decks folder you point it at, the viewer binds to `127.0.0.1`, and it never deletes a deck.
+deck collects nothing. No telemetry, no analytics, no account, and **no outbound network requests at all**. The fonts are bundled rather than fetched, so it works with the wifi off. It reads and writes only the decks folder you point it at, the viewer binds to `127.0.0.1`, and it never deletes a deck.
 
 Full policy: [PRIVACY.md](PRIVACY.md).
 
@@ -222,8 +222,20 @@ Full policy: [PRIVACY.md](PRIVACY.md).
 
 Report a vulnerability privately through the repository's **Security** tab, not a public issue. Policy and threat model: [SECURITY.md](SECURITY.md).
 
+## Disclaimer
+
+deck is a personal open-source project, not a commercial product. It is free, there is no company behind it, no subscription, and nothing is being sold. I built it for my own recordings and put it in the open because it might be useful to someone else.
+
+Use it because you want to. Nobody is asking you to, and installing it is entirely your own choice.
+
+It is provided **as is**, with no warranty of any kind, express or implied. I wrote it carefully and in good faith: it collects nothing, it sends nothing anywhere, and it never deletes a deck. That is what it is built to do and what I intend, but it is not a guarantee. Software has bugs, including this one.
+
+To the fullest extent the law allows, I accept no liability for any loss, damage or claim arising out of using it, including lost or damaged work. Your decks are your own files on your own disk. Back them up the way you back up anything you would be sorry to lose.
+
+If that is not a trade you want to make, do not install it. That is a completely reasonable choice.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
 
-The bundled typefaces — Instrument Serif, Inter, Caveat and JetBrains Mono — are SIL Open Font License 1.1 and are redistributed unmodified with their notices in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
+The bundled typefaces (Instrument Serif, Inter, Caveat and JetBrains Mono) are SIL Open Font License 1.1 and are redistributed unmodified with their notices in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).

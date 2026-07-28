@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Report privately through GitHub's [private vulnerability reporting](https://github.com/bassotov/deck/security/advisories/new) — the **Security** tab on the repository, then **Report a vulnerability**. That channel is private, so a report does not become a public zero-day the moment it is filed.
+Report privately through GitHub's [private vulnerability reporting](https://github.com/bassotov/deck/security/advisories/new): the **Security** tab on the repository, then **Report a vulnerability**. That channel is private, so a report does not become a public zero-day the moment it is filed.
 
 Please do not open a public issue for a security problem.
 
@@ -12,7 +12,7 @@ What helps: what you did, what happened, what you expected, and the version (`de
 
 ## Supported versions
 
-The latest release. deck is a local tool with no server component, so there is no deployment to patch — updating means installing the current release.
+The latest release. deck is a local tool with no server component, so there is no deployment to patch. Updating means installing the current release.
 
 ## What the threat model is
 
