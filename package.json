@@ -29,7 +29,10 @@
     "lib",
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "PRIVACY.md",
+    "SECURITY.md",
+    "THIRD-PARTY-LICENSES.md"
   ],
   "engines": {
     "node": ">=20.19"
