@@ -7,18 +7,14 @@ No account, no cloud, no binary format. The deck is a file on your disk that you
 ![The deck window: storyline list, the slide stage, the tool rail](docs/app.png)
 
 ```bash
-git clone https://github.com/bassotov/deck.git
-cd deck
-npm install
-npm run build
-npm link             # puts `deck` on your PATH
-
-deck ~/Notes/Decks   # opens your browser
+npx @bassotov/deck ~/Notes/Decks
 ```
 
-Or `npm run dev` inside the clone, which opens the two example decks in `decks/`.
+That is the whole install. It opens your browser on whatever markdown is in that folder, and writes nothing you did not ask for.
 
-> Going to npm as `@bassotov/deck` shortly, so this becomes `npx @bassotov/deck ~/Notes/Decks` with no clone at all.
+Keep it around with `npm i -g @bassotov/deck`, then just `deck ~/Notes/Decks`.
+
+Working on it instead? Clone it, `npm install`, and `npm run dev` opens the two example decks in `decks/`.
 
 ## What it does
 
@@ -168,7 +164,7 @@ Build one yourself with `npm run bundle`.
 ### Claude Code
 
 ```bash
-claude mcp add deck -- deck mcp ~/Notes/Decks
+claude mcp add deck -- npx -y @bassotov/deck mcp ~/Notes/Decks
 ```
 
 ### Anything else
@@ -176,10 +172,12 @@ claude mcp add deck -- deck mcp ~/Notes/Decks
 ```json
 {
   "mcpServers": {
-    "deck": { "command": "deck", "args": ["mcp", "~/Notes/Decks"] }
+    "deck": { "command": "npx", "args": ["-y", "@bassotov/deck", "mcp", "~/Notes/Decks"] }
   }
 }
 ```
+
+Both use `npx`, so nothing has to be installed first. If you already have it globally, `"command": "deck"` with `["mcp", "~/Notes/Decks"]` works too.
 
 | Tool | What it does |
 | --- | --- |
@@ -197,9 +195,9 @@ The write path is deliberately careful: `write_deck` will not overwrite an exist
 
 ## Where this is going
 
-The CLI, the MCP server and the Claude Desktop extension all landed. What is left:
+The CLI, the MCP server, the Claude Desktop extension and the npm package all landed. What is left:
 
-- [ ] **Publish to npm** so `npx` works with no clone.
+- [x] ~~**Publish to npm**~~ — `npx @bassotov/deck` works.
 - [ ] **A Windows/Linux pass** on the shortcuts, which are written for a Mac keyboard today.
 - [ ] **PDF export** alongside PNG, if anyone wants it.
 
