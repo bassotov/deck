@@ -1,9 +1,26 @@
 {
-  "name": "stories",
+  "name": "deck",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Storyline decks for daily/weekly build-in-public videos. Reads markdown from the PashaOS vault, renders 16:9 slides, annotate with pen/highlighter/arrow/eraser.",
+  "description": "Write a storyline in markdown, get a 16:9 deck you can draw on while you record.",
+  "license": "MIT",
+  "author": "Pasha Barbashin (https://github.com/bassotov)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bassotov/deck.git"
+  },
+  "homepage": "https://github.com/bassotov/deck#readme",
+  "bugs": "https://github.com/bassotov/deck/issues",
+  "keywords": [
+    "slides",
+    "presentation",
+    "markdown",
+    "annotation",
+    "screencast",
+    "build-in-public",
+    "deck"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

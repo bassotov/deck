@@ -1,10 +1,8 @@
-# stories
+# deck
 
-A storyline deck for the daily/weekly build-in-public videos. Storylines are markdown
-in the PashaOS vault; this app renders them as 16:9 slides you can scroll through and
-draw on while recording a voiceover.
-
-Defers to `~/.claude/CLAUDE.md` and the vault's `~/Documents/PashaOS/CLAUDE.md`.
+Storylines are markdown files; this app renders them as 16:9 slides you can scroll
+through and draw on while recording a voiceover. `README.md` is the user-facing doc —
+this file is the working reference for the internals.
 
 ## Run it
 
@@ -19,16 +17,26 @@ reading the local filesystem. There is no deployed build.
 
 | What | Where |
 | --- | --- |
-| Storylines (the content) | `~/Documents/PashaOS/Content/Stories/*.md` |
-| Slide images | `~/Documents/PashaOS/Content/Stories/images/` |
-| Annotations | `~/Documents/PashaOS/Content/Stories/.ink/<slug>.json` |
+| Storylines (the content) | `$DECKS_DIR/*.md`, default `./decks` |
+| Slide images | `$DECKS_DIR/images/` |
+| Annotations | `$DECKS_DIR/.ink/<slug>.json` |
 | The app | this repo |
 
-The content directory is deliberately **outside** the repo: storylines belong in the
-Obsidian graph, and `node_modules` must never sit inside the vault. Override with
-`STORIES_DIR=/path npm run dev`.
+The content directory is configurable and expected to live **outside** the repo for
+anyone using this for real: storylines belong wherever they already write, and
+`node_modules` must never land in a notes folder. `DECKS_DIR=/path npm run dev`, or a
+gitignored `.env.local`. `STORIES_DIR` is still read as the old name for it.
 
-Annotations go in a dot-folder so Obsidian ignores them.
+`ASSET_ROOT` widens the by-name image lookup to a parent folder, which is how an
+Obsidian-style `![[shot.png]]` resolves against a whole vault. It defaults to
+`DECKS_DIR`, because the fallback walks the tree and the parent of an arbitrary decks
+folder can be anything.
+
+Annotations go in a dot-folder so note apps and finders ignore them.
+
+Nothing here ever writes to a `.md`. Ink, pasted images and their placement are stored
+beside the deck, never spliced into the source — that is what keeps a storyline editable
+anywhere and safe to keep in someone else's synced folder.
 
 ## The storyline format
 
@@ -54,20 +62,19 @@ three, four — however many you write.
 
 `![[chart.png]]` (Obsidian embed) or `![](chart.png)`, resolved against the storylines
 folder and served by the dev server at `/stories-assets/…`. Generated graphics go in
-`Content/Stories/images/` — one pass with the `visual-generation` skill is enough,
-these are internal docs.
+`$DECKS_DIR/images/`.
 
-`Content/Stories/how-storylines-work.md` is the living reference deck for all of this —
-update it when the format changes.
+`decks/how-storylines-work.md` is the living reference deck for all of this — it renders
+itself, so update it when the format changes.
 
 ## Design
 
-Follows the vault design brain: editorial-terminal chrome (warm charcoal shell, mono
-uppercase labels) around a warm near-white slide stage. Instrument Serif display,
-Inter body, Caveat accent, one coral accent (`#FF5A1F`) reserved for action and ink.
+Editorial-terminal chrome (warm charcoal shell, mono uppercase labels) around a warm
+near-white slide stage. Instrument Serif display, Inter body, Caveat accent, one coral
+accent (`#FF5A1F`) reserved for action and ink.
 
 **Default slide shape: big title on top, content below, air underneath.** This is the
-house layout — the one Pasha picked — so `default` and `columns` share it. Only `title`,
+house layout, so `default` and `columns` share it. Only `title`,
 `center` and `quote` centre vertically. Don't "fix" the empty space at the bottom of a
 short slide; it's the point.
 
@@ -94,7 +101,7 @@ opacity became editable.
 
 Decks on disk predate that model. `normalizeSlide` in `lib/ink.ts` is the one load
 boundary that converts flat legacy rows (`color`/`size`) into the current shape, so no
-renderer or hit-tester carries a fallback. Nothing rewrites the vault — a slide upgrades
+renderer or hit-tester carries a fallback. Nothing rewrites on load — a slide upgrades
 the next time it is saved.
 
 `InkLayer.tsx` is the orchestrator; the parts live beside it. `ink/ElementView.tsx` renders
