@@ -98,8 +98,9 @@ renderer or hit-tester carries a fallback. Nothing rewrites the vault — a slid
 the next time it is saved.
 
 `InkLayer.tsx` is the orchestrator; the parts live beside it. `ink/ElementView.tsx` renders
-one element plus its fat hit area, `ink/SelectionOverlay.tsx` draws outlines, grips and the
-marquee, `ink/TextEditor.tsx` owns the floating textarea, `hooks/useInkDrawing.ts` authors
+one element plus its fat hit area, `ink/SelectionOverlay.tsx` draws outlines and grips (the
+marquee rect itself is drawn by `InkLayer`, since it isn't tied to a selection),
+`ink/TextEditor.tsx` owns the floating textarea, `hooks/useInkDrawing.ts` authors
 new elements and `hooks/useSelectionInteraction.ts` manipulates existing ones through a
 single `Interaction` union, so its modes can't overlap. Adding a tool means `lib/ink.ts`
 (geometry), `useInkDrawing.ts` (pointer handling) and `ToolRail.tsx` (the button).
@@ -196,9 +197,22 @@ verbatim. One save is all it takes for front/back to stick forever.
 `⌘B` sidebar · `F` focus mode · `Esc` out — clears a selection, then the tool, then focus, one step per press
 
 **Arrows nudge whatever is selected** (4 stage units, 20 with Shift) and only navigate
-slides when nothing is selected. `space`, `j` and `k` navigate **always** — that is the
-escape hatch mid-recording, so advancing a slide never depends on remembering to press
-`Esc` first. Scroll navigates too.
+slides when nothing is selected. `space`, `j`, `k` and scroll navigate **always** — that
+is the escape hatch mid-recording, so advancing a slide never depends on remembering to
+press `Esc` first.
+
+Every key above — digits, letters, arrows, navigation, and `Esc`/`⌫` — is ignored while a
+gesture is in flight: a stroke, a drag, a handle resize or a marquee. Pointer capture keeps
+delivering events to a gesture that has already started, so a keyboard switch landing
+mid-stroke used to reinterpret or corrupt it, and `Esc` mid-resize used to unmount the grip
+holding capture and leave the keyboard locked for the rest of the session. Gestures
+therefore end on a `window` pointer-up, never on the node that reported them — that node can
+be unmounted by the very key that ended the gesture.
+
+The click-versus-drag threshold is **4 CSS pixels converted through the live stage scale**,
+not a raw stage-unit constant. One stage unit is about 0.68 CSS px, so a literal `1` meant
+any real hand movement counted as a drag and double-click-to-edit and Shift-click-to-add
+both failed on a wobble. Synthetic test mice don't wobble; hands do.
 
 Digits are read off `e.code`, not `e.key` — Shift+1 arrives as `!` on a Mac layout.
 
@@ -206,10 +220,6 @@ The property bar's slot under the stage is always reserved, so the stage never r
 when a selection appears. A stage that changes size mid-recording is far worse than a
 strip of empty space.
 
-Arrows nudge the selection when one exists (4 stage units, Shift = 20) and navigate
-the slide only when nothing is selected. `space`, `j`, `k` and scroll always navigate
-regardless of selection — the guaranteed escape hatch mid-recording — and every one of
-these, including the digits above, is ignored while a stroke, a drag, or a handle
-resize is still in flight, so a keyboard switch can't land mid-gesture and corrupt it.
-
-The URL carries `#/<slug>/<slide>`, so a deck reopens where it was left.
+The URL carries `#/<slug>/<slide>`, so a deck reopens where it was left, and `hashchange`
+is honoured so browser back/forward works. The app's own writes use `replaceState`, which
+doesn't fire the event, so there's no loop.
