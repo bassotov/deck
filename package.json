@@ -1,9 +1,8 @@
 {
-  "name": "deck",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@bassotov/deck",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Write a storyline in markdown, get a 16:9 deck you can draw on while you record.",
+  "description": "Write a storyline in markdown, get a 16:9 deck you can draw on while you record. Ships a CLI and an MCP server.",
   "license": "MIT",
   "author": "Pasha Barbashin (https://github.com/bassotov)",
   "repository": {
@@ -19,20 +18,38 @@
     "annotation",
     "screencast",
     "build-in-public",
-    "deck"
+    "deck",
+    "mcp",
+    "mcp-server"
   ],
+  "bin": {
+    "deck": "bin/deck.mjs"
+  },
+  "files": [
+    "bin",
+    "server",
+    "mcp",
+    "scripts",
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "export": "node scripts/export.mjs"
+    "export": "node scripts/export.mjs",
+    "start": "node bin/deck.mjs",
+    "mcp": "node bin/deck.mjs mcp",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "marked": "^18.0.7",
-    "perfect-freehand": "^1.2.3",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "@modelcontextprotocol/server": "^2.0.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -40,6 +57,10 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
+    "marked": "^18.0.7",
+    "perfect-freehand": "^1.2.3",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.1.5"
