@@ -218,6 +218,12 @@ deck collects nothing. No telemetry, no analytics, no account, and **no outbound
 
 Full policy: [PRIVACY.md](PRIVACY.md).
 
+## Security
+
+Report a vulnerability privately through the repository's **Security** tab, not a public issue. Policy and threat model: [SECURITY.md](SECURITY.md).
+
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
+
+The bundled typefaces — Instrument Serif, Inter, Caveat and JetBrains Mono — are SIL Open Font License 1.1 and are redistributed unmodified with their notices in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).

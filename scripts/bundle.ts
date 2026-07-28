@@ -121,7 +121,9 @@ await fs.mkdir(STAGE, { recursive: true })
 await copyDir(path.join(PKG_ROOT, 'lib'), path.join(STAGE, 'lib'))
 await copyDir(path.join(PKG_ROOT, 'dist'), path.join(STAGE, 'dist'))
 await fs.copyFile(path.join(PKG_ROOT, 'mcpb', 'icon.png'), path.join(STAGE, 'icon.png'))
-for (const doc of ['README.md', 'LICENSE', 'PRIVACY.md']) {
+// THIRD-PARTY-LICENSES carries the OFL notices for the bundled typefaces:
+// the licence has to travel with the font binaries in dist/.
+for (const doc of ['README.md', 'LICENSE', 'PRIVACY.md', 'SECURITY.md', 'THIRD-PARTY-LICENSES.md']) {
   await fs.copyFile(path.join(PKG_ROOT, doc), path.join(STAGE, doc))
 }
 

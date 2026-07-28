@@ -1,6 +1,6 @@
 {
   "name": "@bassotov/deck",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "type": "module",
   "description": "PowerPoint for agents. Your agent writes the deck as plain markdown; you open it and draw on it while you record.",
   "license": "MIT",
