@@ -59,8 +59,12 @@ export function createDeckMcpServer(
         readOnlyHint: true,
         openWorldHint: false,
       },
+      // Descriptive, not imperative. Directory review rejects a description that
+      // tells Claude how to behave or to go call something else; it may only say
+      // what the tool is. The reference still gets used, because it is the only
+      // place the layouts are written down.
       description:
-        'The storyline format: how slides are split, every layout and the blocks it expects, the inline accents, speaker notes and image embeds. Read this BEFORE writing or editing a deck — the layouts are not guessable and getting them wrong produces a deck that renders but reads badly.',
+        'The reference for the storyline format: how slides are split, every layout and the blocks it expects, the inline accents, speaker notes and image embeds. The layouts cannot be inferred from a deck alone, and a deck written without them renders but reads badly.',
       inputSchema: z.object({}),
     },
     async () => text(SYNTAX),
@@ -112,7 +116,7 @@ export function createDeckMcpServer(
         openWorldHint: false,
       },
       description:
-        'Write a whole deck. Creates it if new. Call deck_syntax first if you have not already. Overwriting an existing deck requires overwrite:true, and replaces the entire file — read_deck first if you mean to keep any of it.',
+        'Write a whole deck as markdown, creating it if it does not exist. The format is documented by the deck_syntax tool. Overwriting an existing deck requires overwrite:true and replaces the entire file; without it, an existing deck is left untouched and an error is returned.',
       inputSchema: z.object({
         slug: z.string().describe('Filename without .md. Lowercase with hyphens, e.g. launch-week'),
         content: z.string().describe('The complete markdown for the deck'),
