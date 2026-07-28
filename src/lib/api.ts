@@ -17,6 +17,18 @@ export async function fetchStories(): Promise<{ dir: string; stories: Story[] }>
   }
 }
 
+/**
+ * Live reload, over server-sent events rather than Vite's HMR channel: the
+ * published CLI serves the built app with no Vite in the process, and one
+ * transport that works in both beats a dev-only path plus a fallback.
+ * `EventSource` reconnects on its own, so a restarted server re-attaches.
+ */
+export function watchDecks(onChange: () => void): () => void {
+  const source = new EventSource('/api/watch')
+  source.addEventListener('decks', () => onChange())
+  return () => source.close()
+}
+
 export async function createStory(slug: string, raw: string): Promise<void> {
   const res = await fetch('/api/stories', {
     method: 'POST',

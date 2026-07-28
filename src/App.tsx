@@ -4,7 +4,7 @@ import SlideView from './components/SlideView'
 import InkLayer from './components/InkLayer'
 import PropertyBar from './components/PropertyBar'
 import ToolRail from './components/ToolRail'
-import { addImage, createStory, fetchInk, fetchStories, saveInk } from './lib/api'
+import { addImage, createStory, fetchInk, fetchStories, saveInk, watchDecks } from './lib/api'
 import {
   INK_COLORS,
   SHAPE_ORDER,
@@ -228,7 +228,7 @@ export default function App() {
 
   useEffect(() => {
     void load()
-    if (import.meta.hot) import.meta.hot.on('stories:changed', () => void load())
+    return watchDecks(() => void load())
   }, [load])
 
   // Keep the index inside the deck when a storyline is edited or swapped.
