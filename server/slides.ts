@@ -1,9 +1,12 @@
 /**
  * The slide grammar. Kept apart from the renderer so the shape of a deck is
- * stated once, with no markdown parser attached to it — and kept in plain JS so
- * the app, the CLI and the MCP server all read a deck the same way. A second
- * splitter that disagreed about fenced code blocks would renumber slides only
- * on the decks that document the syntax.
+ * stated once, with no markdown parser attached to it — and shared by the app,
+ * the CLI and the MCP server, because a second splitter that disagreed about
+ * fenced code blocks would renumber slides on exactly the decks that document
+ * the syntax.
+ *
+ * This module is bundled into the browser as well as compiled for Node, so it
+ * must never import anything from `node:`.
  */
 
 /**
@@ -23,18 +26,12 @@ const BREAK_LINE = /^[ \t]*---[ \t]*$/
  * apart and fractures one slide into two, silently renumbering everything
  * after it — so this walks line by line, tracking whether a ``` or ~~~ fence
  * is open, and only treats `---` as a break outside one.
- *
- * @param {string} raw
- * @returns {string[]}
  */
-export function splitSlides(raw) {
+export function splitSlides(raw: string): string[] {
   const lines = raw.split(/\r?\n/)
-  /** @type {string[]} */
-  const blocks = []
-  /** @type {string[]} */
-  let current = []
-  /** @type {{ marker: string, length: number } | null} */
-  let fence = null
+  const blocks: string[] = []
+  let current: string[] = []
+  let fence: { marker: string; length: number } | null = null
 
   for (const line of lines) {
     const hit = line.match(FENCE)
@@ -65,11 +62,8 @@ export function splitSlides(raw) {
  * renders fine on the slide, but this string is used raw in the sidebar and the
  * outline, and it seeds the annotation key — so leaving the tags in printed the
  * markup at the user and keyed marks to `h:how-span-class-hand-deck-span-works`.
- *
- * @param {string} md
- * @returns {string | null}
  */
-export function firstHeading(md) {
+export function firstHeading(md: string): string | null {
   const m = md.match(/^\s*#{1,3}\s+(.+?)\s*$/m)
   if (!m) return null
   const text = m[1]

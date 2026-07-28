@@ -1,17 +1,18 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { MIME, StoreError } from './store.mjs'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import { MIME, StoreError, type DeckStore } from './store.ts'
 
-const json = (res, status, body) => {
+const json = (res: ServerResponse, status: number, body: unknown): void => {
   res.statusCode = status
   res.setHeader('Content-Type', 'application/json')
   res.end(JSON.stringify(body))
 }
 
-const readBody = (req, limit = 8_000_000) =>
+const readBody = (req: IncomingMessage, limit = 8_000_000): Promise<string> =>
   new Promise((resolve, reject) => {
     let data = ''
-    req.on('data', (c) => {
+    req.on('data', (c: Buffer) => {
       data += c
       if (data.length > limit) reject(new Error('body too large'))
     })
@@ -19,13 +20,19 @@ const readBody = (req, limit = 8_000_000) =>
     req.on('error', reject)
   })
 
+export interface Watchers {
+  add(res: ServerResponse): void
+  notify(): void
+  readonly size: number
+}
+
 /**
  * Everyone watching for a deck change on disk. The dev server used Vite's HMR
  * channel for this, which the standalone server has no equivalent of — so both
  * now push the same server-sent event and the client has one code path.
  */
-export function createWatchers() {
-  const clients = new Set()
+export function createWatchers(): Watchers {
+  const clients = new Set<ServerResponse>()
   return {
     add(res) {
       clients.add(res)
@@ -40,11 +47,16 @@ export function createWatchers() {
   }
 }
 
+export type ApiHandler = (req: IncomingMessage, res: ServerResponse) => Promise<boolean>
+
 /**
- * The HTTP surface, over a store. Returns true when it handled the request, so
+ * The HTTP surface, over a store. Resolves true when it handled the request, so
  * a caller can fall through to static files or to the next middleware.
  */
-export function createApiHandler(store, watchers = createWatchers()) {
+export function createApiHandler(
+  store: DeckStore,
+  watchers: Watchers = createWatchers(),
+): ApiHandler {
   return async function handle(req, res) {
     const url = (req.url ?? '').split('?')[0]
 
@@ -90,41 +102,52 @@ export function createApiHandler(store, watchers = createWatchers()) {
       }
 
       if (url === '/api/stories' && req.method === 'GET') {
-        return json(res, 200, { dir: store.config.decksDir, stories: await store.listDecks() }), true
+        json(res, 200, { dir: store.config.decksDir, stories: await store.listDecks() })
+        return true
       }
 
       if (url === '/api/stories' && req.method === 'POST') {
         const { slug, raw } = JSON.parse((await readBody(req)) || '{}')
         await store.createDeck(slug, raw)
         watchers.notify()
-        return json(res, 200, { ok: true, slug }), true
+        json(res, 200, { ok: true, slug })
+        return true
       }
 
       // Paste or drop an image: store the bytes and hand back the name. The
       // placement is an ink element, so the slide's markdown is untouched.
       if (url === '/api/image' && req.method === 'POST') {
         const { slug, mime, data } = JSON.parse(await readBody(req, 40_000_000))
-        return json(res, 200, { name: await store.addImage(slug, mime, data) }), true
+        json(res, 200, { name: await store.addImage(slug, mime, data) })
+        return true
       }
 
       const ink = url.match(/^\/api\/ink\/(.+)$/)
       if (ink) {
         const slug = decodeURIComponent(ink[1])
-        if (req.method === 'GET') return json(res, 200, await store.readInk(slug)), true
+        if (req.method === 'GET') {
+          json(res, 200, await store.readInk(slug))
+          return true
+        }
         if (req.method === 'PUT') {
           await store.writeInk(slug, (await readBody(req)) || '{}')
-          return json(res, 200, { ok: true }), true
+          json(res, 200, { ok: true })
+          return true
         }
       }
 
-      return json(res, 404, { error: 'not found' }), true
+      json(res, 404, { error: 'not found' })
+      return true
     } catch (err) {
       const status = err instanceof StoreError ? err.status : 500
+      const body: Record<string, unknown> = {
+        error: String(err instanceof Error ? err.message : err),
+      }
       // A 409 carries the slug so the client can navigate to what already exists
       // rather than reporting a create that silently did nothing.
-      const body = { error: String(err?.message ?? err) }
       if (err instanceof StoreError && err.slug) Object.assign(body, { ok: false, slug: err.slug })
-      return json(res, status, body), true
+      json(res, status, body)
+      return true
     }
   }
 }

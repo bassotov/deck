@@ -1,9 +1,9 @@
 import { defineConfig, type Plugin, type ViteDevServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwind from '@tailwindcss/vite'
-import { resolveConfig } from './server/config.mjs'
-import { createStore } from './server/store.mjs'
-import { createApiHandler, createWatchers } from './server/api.mjs'
+import { resolveConfig } from './server/config.ts'
+import { createStore } from './server/store.ts'
+import { createApiHandler, createWatchers } from './server/api.ts'
 
 /**
  * The dev server and the published CLI serve the same API over the same store —

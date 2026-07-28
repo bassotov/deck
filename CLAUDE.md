@@ -7,31 +7,51 @@ this file is the working reference for the internals.
 ## Run it
 
 ```bash
-npm run dev                # vite, http://localhost:5290
-node bin/deck.mjs [dir]    # the published CLI path, serving the built app
-node bin/deck.mjs mcp      # the MCP server, on stdio
+npm run dev            # vite, http://localhost:5290 — the app-development loop
+npm start              # build, then the CLI, serving the built app
+npm run mcp            # build, then the MCP server on stdio
+npm run typecheck      # both projects
 ```
 
 ## Shape
 
 Three front ends over one core. The rule that makes this work: nothing product-shaped
-lives in `vite.config.ts`, and nothing transport-shaped lives in `server/store.mjs`.
+lives in `vite.config.ts`, and nothing transport-shaped lives in `server/store.ts`.
 
 ```
-server/config.mjs   where the decks are — argument, then env, then .env file, then ./decks
-server/slides.mjs   the slide grammar. plain JS because all three front ends read decks
-server/store.mjs    every filesystem operation. no HTTP, no MCP
-server/api.mjs      the HTTP surface over a store; returns true when it handled a request
-server/serve.mjs    the standalone server: built app + api + live reload, no Vite
-vite.config.ts      the dev adapter — middleware around the same handler
-bin/deck.mjs        the CLI
-mcp/                the MCP server and the syntax crib it hands to agents
-src/                the React app
+server/paths.ts    package root, dist and the export script, found not counted
+server/config.ts   where the decks are — argument, then env, then env file, then ./decks
+server/slides.ts   the slide grammar. imports no `node:`, so it bundles to the browser too
+server/store.ts    every filesystem operation. no HTTP, no MCP
+server/api.ts      the HTTP surface over a store; resolves true when it handled a request
+server/serve.ts    the standalone server: built app + api + live reload, no Vite
+vite.config.ts     the dev adapter — middleware around the same handler
+bin/deck.ts        the CLI
+mcp/               the MCP server and the syntax crib it hands to agents
+src/               the React app
+scripts/export.ts  PNG export, driving `serve` through Playwright
 ```
 
-Written as `.mjs`, not TypeScript, so the published package needs no build step of its
-own and `files` can ship the sources directly. `src/lib/slides.ts` is a typed re-export
-of `server/slides.mjs`, which is why `allowJs` is on.
+## The two builds
+
+| | Project | In | Out |
+| --- | --- | --- | --- |
+| Client | `tsconfig.json` | `src`, `vite.config.ts` | `dist/` (vite) |
+| Node | `tsconfig.node.json` | `server`, `bin`, `mcp`, `scripts` | `lib/` (tsc) |
+
+Both are shipped: `files` is `["lib","dist"]` and `bin` points at `lib/bin/deck.js`.
+
+The Node project is `module: NodeNext` with **`rewriteRelativeImportExtensions`**, so
+imports are written with the real `./store.ts` extension and emitted as `./store.js`.
+The alternative — writing `.js` in a `.ts` file — is the conventional trick and it reads
+like a mistake every time.
+
+`server/slides.ts` is compiled twice: by tsc for Node, and by Vite into the browser
+bundle via the `src/lib/slides.ts` re-export. That is why it must never import `node:`.
+
+`scripts/export.ts` declares the slice of Playwright it drives rather than importing its
+types, and loads it through a variable specifier. Playwright is deliberately not a
+dependency, and a literal import would fail the build on any machine without it.
 
 **Live reload is server-sent events**, not Vite HMR. The standalone server has no HMR
 channel, and one transport that works in both beats a dev-only path plus a fallback.
@@ -106,13 +126,15 @@ it demos the ink layer on a first run, and it is what the README screenshots sho
 
 ## Export
 
-`npm run export` drives the dev server through Playwright and writes PNGs to `exports/`.
-Playwright is deliberately not a dependency — `npm i -D playwright` when you need it.
+`npm run export` starts a `serve` and drives it through Playwright, writing PNGs to
+`exports/`. Playwright is deliberately not a dependency — `npm i -D playwright` when you
+need it. It renders the built app, so the build has to have run; the npm script does it.
 
-Slide count comes from the app, by overshooting the hash index and reading back the
-value it clamps to. Recomputing it here would mean a second `---` splitter, and the
-regex version disagrees with the real one on fenced code blocks — that is, on exactly
-the decks that document the format. The hash is 1-based; the filenames are 0-based.
+Slide count is computed with the real `splitSlides` and then filtered the way the
+renderer filters — strip the directives, drop what is left empty. Both halves matter: a
+regex `---` splitter disagrees about fenced code blocks, on exactly the decks that
+document the format, and skipping the filter asks for a directive-only slide the app
+never shows. The URL hash is 1-based; the filenames are 0-based, to match `--slides`.
 
 ## Design
 

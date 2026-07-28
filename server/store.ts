@@ -1,10 +1,11 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import type { DeckConfig } from './config.ts'
 
 export const SLUG = /^[a-z0-9][a-z0-9._-]*$/i
 
-export const MIME = {
+export const MIME: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -14,7 +15,7 @@ export const MIME = {
   '.avif': 'image/avif',
 }
 
-const EXT_FOR = {
+const EXT_FOR: Record<string, string> = {
   'image/png': '.png',
   'image/jpeg': '.jpg',
   'image/webp': '.webp',
@@ -26,29 +27,51 @@ const SKIP_DIRS = new Set(['node_modules', '.git', '.obsidian', '.trash'])
 
 /** Thrown where the cause maps onto an HTTP status the API layer should report. */
 export class StoreError extends Error {
-  constructor(message, status = 400, extra = {}) {
+  readonly status: number
+  readonly slug?: string
+
+  constructor(message: string, status = 400, extra: { slug?: string } = {}) {
     super(message)
+    this.name = 'StoreError'
     this.status = status
-    Object.assign(this, extra)
+    if (extra.slug !== undefined) this.slug = extra.slug
   }
+}
+
+export interface RawDeck {
+  slug: string
+  raw: string
+  mtime: number
+}
+
+export interface DeckStore {
+  readonly config: DeckConfig
+  resolveAsset(rel: string): Promise<string | null>
+  listDecks(): Promise<RawDeck[]>
+  readDeck(slug: string): Promise<string>
+  createDeck(slug: string, raw: string): Promise<{ slug: string; file: string }>
+  writeDeck(slug: string, raw: string): Promise<{ slug: string; file: string; created: boolean }>
+  addImage(slug: string, mime: string, base64: string): Promise<string>
+  readInk(slug: string): Promise<Record<string, unknown>>
+  writeInk(slug: string, body: string): Promise<void>
 }
 
 /**
  * Every filesystem operation the app performs, with no HTTP or MCP in sight.
  * The dev server, the standalone server and the MCP server all drive this same
- * object, so a rule enforced here — never write a `.md` the user did not ask
- * for, never serve a file outside the asset root — holds for all three.
+ * object, so a rule enforced here — never serve a file outside the asset root,
+ * never clobber a deck that was not named — holds for all three.
  */
-export function createStore(config) {
+export function createStore(config: DeckConfig): DeckStore {
   const { decksDir, assetRoot, inkDir, imagesDir } = config
 
   /** basename -> absolute path. Rebuilt on a miss, so a fresh paste shows up. */
-  let imageIndex = new Map()
+  let imageIndex = new Map<string, string>()
   let indexedAt = 0
 
-  async function indexAssetRoot() {
-    const found = new Map()
-    const walk = async (dir, depth) => {
+  async function indexAssetRoot(): Promise<Map<string, string>> {
+    const found = new Map<string, string>()
+    const walk = async (dir: string, depth: number): Promise<void> => {
       if (depth > 8) return
       const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => [])
       for (const entry of entries) {
@@ -63,7 +86,7 @@ export function createStore(config) {
     return found
   }
 
-  function assertSlug(slug) {
+  function assertSlug(slug: string): string {
     if (!SLUG.test(slug ?? '')) throw new StoreError('bad slug', 400)
     return slug
   }
@@ -95,7 +118,7 @@ export function createStore(config) {
         (n) => n.endsWith('.md') && !n.startsWith('.'),
       )
       const settled = await Promise.allSettled(
-        names.map(async (name) => {
+        names.map(async (name): Promise<RawDeck> => {
           const file = path.join(decksDir, name)
           const [raw, stat] = await Promise.all([fs.readFile(file, 'utf8'), fs.stat(file)])
           return { slug: name.replace(/\.md$/, ''), raw, mtime: stat.mtimeMs }
@@ -105,7 +128,7 @@ export function createStore(config) {
       // An editor saves into this folder while the watcher triggers a refetch, so
       // a file mid-write, permission-denied, or deleted between the readdir and
       // the readFile is routine — skip it rather than taking down the whole list.
-      const decks = []
+      const decks: RawDeck[] = []
       settled.forEach((result, i) => {
         if (result.status === 'fulfilled') decks.push(result.value)
         else console.warn(`[deck] skipping ${names[i]}:`, result.reason)
@@ -115,8 +138,7 @@ export function createStore(config) {
 
     async readDeck(slug) {
       assertSlug(slug)
-      const file = path.join(decksDir, `${slug}.md`)
-      const raw = await fs.readFile(file, 'utf8').catch(() => null)
+      const raw = await fs.readFile(path.join(decksDir, `${slug}.md`), 'utf8').catch(() => null)
       if (raw === null) throw new StoreError(`no deck called ${slug}`, 404)
       return raw
     },
@@ -132,7 +154,8 @@ export function createStore(config) {
         // `wx` correctly refuses an existing deck — but swallowing that and
         // reporting success had the client navigate into the existing file
         // believing it had just created an empty one.
-        if (e.code === 'EEXIST') throw new StoreError('exists', 409, { slug })
+        if ((e as NodeJS.ErrnoException).code === 'EEXIST')
+          throw new StoreError('exists', 409, { slug })
         throw e
       }
       return { slug, file }
@@ -155,7 +178,7 @@ export function createStore(config) {
       if (!ext) throw new StoreError(`unsupported type: ${mime}`, 415)
 
       await fs.mkdir(imagesDir, { recursive: true })
-      const existing = await fs.readdir(imagesDir).catch(() => [])
+      const existing = await fs.readdir(imagesDir).catch(() => [] as string[])
       const escaped = slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       const taken = existing
         .map((n) => n.match(new RegExp(`^${escaped}-(\\d+)\\.`)))

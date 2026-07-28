@@ -2,11 +2,26 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 
+/** Where the decks are, and how wide the by-name image search may go. */
+export interface DeckConfig {
+  decksDir: string
+  assetRoot: string
+  inkDir: string
+  imagesDir: string
+}
+
+export interface ResolveConfigOptions {
+  /** An explicit directory — a CLI argument. Wins over every environment source. */
+  decksDir?: string | undefined
+  assetRoot?: string | undefined
+  cwd?: string
+}
+
 /**
  * A shell expands `~` in `DECKS_DIR=~/notes deck`; a line in an env file does
  * not, and `path.resolve` would then make a literal `~` directory.
  */
-export function resolveDir(dir) {
+export function resolveDir(dir: string): string {
   return path.resolve(dir.startsWith('~/') ? path.join(os.homedir(), dir.slice(2)) : dir)
 }
 
@@ -15,10 +30,10 @@ export function resolveDir(dir) {
  * and the MCP server honour the same `.env.local` the dev server does without
  * dragging Vite into a published package.
  */
-function readEnvFiles(cwd) {
-  const found = {}
+function readEnvFiles(cwd: string): Record<string, string> {
+  const found: Record<string, string> = {}
   for (const name of ['.env', '.env.local']) {
-    let text
+    let text: string
     try {
       text = fs.readFileSync(path.join(cwd, name), 'utf8')
     } catch {
@@ -38,14 +53,17 @@ function readEnvFiles(cwd) {
 }
 
 /**
- * Where the decks are and how wide the image search may go.
- *
- * `decksDir` wins over the environment, so an explicit `deck ~/notes` argument
- * is never silently overridden by an env file left in the working directory.
+ * `decksDir` wins over the environment, so an explicit `deck ~/notes` is never
+ * silently overridden by an env file left in the working directory.
  */
-export function resolveConfig({ decksDir, assetRoot, cwd = process.cwd() } = {}) {
+export function resolveConfig({
+  decksDir,
+  assetRoot,
+  cwd = process.cwd(),
+}: ResolveConfigOptions = {}): DeckConfig {
   const fileEnv = readEnvFiles(cwd)
-  const env = (...names) => names.map((n) => process.env[n] ?? fileEnv[n]).find((v) => v)
+  const env = (...names: string[]): string | undefined =>
+    names.map((n) => process.env[n] ?? fileEnv[n]).find((v) => v)
 
   const decks = resolveDir(decksDir ?? env('DECKS_DIR', 'STORIES_DIR') ?? 'decks')
 
@@ -64,5 +82,10 @@ export function resolveConfig({ decksDir, assetRoot, cwd = process.cwd() } = {})
     if (decks.startsWith(resolved + path.sep)) root = resolved
   }
 
-  return { decksDir: decks, assetRoot: root, inkDir: path.join(decks, '.ink'), imagesDir: path.join(decks, 'images') }
+  return {
+    decksDir: decks,
+    assetRoot: root,
+    inkDir: path.join(decks, '.ink'),
+    imagesDir: path.join(decks, 'images'),
+  }
 }

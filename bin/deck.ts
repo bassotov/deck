@@ -1,14 +1,11 @@
 #!/usr/bin/env node
-import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
-import { resolveConfig } from '../server/config.mjs'
+import { resolveConfig } from '../server/config.ts'
+import { EXPORT_SCRIPT, PKG_ROOT, readPackageVersion } from '../server/paths.ts'
 
-const HERE = path.dirname(fileURLToPath(import.meta.url))
-const ROOT = path.join(HERE, '..')
-const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
+const VERSION = readPackageVersion()
 
 const HELP = `
   deck — write a storyline in markdown, get a 16:9 deck you can draw on
@@ -33,8 +30,18 @@ const HELP = `
     deck ~/Notes/Decks --asset-root ~/Notes --port 4000
 `
 
-function parseArgs(argv) {
-  const opts = { open: true, positional: [] }
+interface Options {
+  open: boolean
+  positional: string[]
+  help?: boolean
+  version?: boolean
+  port?: number
+  host?: string
+  assetRoot?: string
+}
+
+function parseArgs(argv: string[]): Options {
+  const opts: Options = { open: true, positional: [] }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--help') opts.help = true
@@ -49,7 +56,7 @@ function parseArgs(argv) {
   return opts
 }
 
-function openBrowser(url) {
+function openBrowser(url: string): void {
   const cmd =
     process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open'
   spawn(cmd, [url], { stdio: 'ignore', detached: true, shell: process.platform === 'win32' })
@@ -57,7 +64,7 @@ function openBrowser(url) {
     .unref()
 }
 
-const TEMPLATE = (title) => `# ${title}
+const TEMPLATE = (title: string): string => `# ${title}
 
 One line on what this is about.
 
@@ -76,7 +83,7 @@ Everything before the first \`---\` is the title slide. Split slides with
 `
 
 /** `deck new launch-week` → `launch-week.md`, and a title humans read. */
-function slugify(name) {
+function slugify(name: string): string {
   return name
     .replace(/\.md$/i, '')
     .toLowerCase()
@@ -84,7 +91,7 @@ function slugify(name) {
     .replace(/^-|-$/g, '')
 }
 
-async function cmdNew(opts) {
+async function cmdNew(opts: Options): Promise<void> {
   const [, name, dir] = opts.positional
   if (!name) throw new Error('deck new needs a name — `deck new launch-week`')
 
@@ -92,31 +99,31 @@ async function cmdNew(opts) {
   if (!slug) throw new Error(`"${name}" has no usable letters or digits in it`)
 
   const config = resolveConfig({ decksDir: dir, assetRoot: opts.assetRoot })
-  const { createStore } = await import('../server/store.mjs')
+  const { createStore } = await import('../server/store.ts')
+  const { StoreError } = await import('../server/store.ts')
   const store = createStore(config)
 
-  const title = name.replace(/\.md$/i, '')
   try {
-    await store.createDeck(slug, TEMPLATE(title))
+    await store.createDeck(slug, TEMPLATE(name.replace(/\.md$/i, '')))
   } catch (err) {
-    if (err.status !== 409) throw err
+    if (!(err instanceof StoreError) || err.status !== 409) throw err
     console.error(`  ${slug}.md already exists — opening it`)
   }
   console.log(`\n  ${path.join(config.decksDir, `${slug}.md`)}`)
-  await cmdServe({ ...opts, positional: ['serve', dir] }, slug)
+  await cmdServe({ ...opts, positional: ['serve', dir].filter(Boolean) as string[] }, slug)
 }
 
-async function cmdServe(opts, openSlug) {
+async function cmdServe(opts: Options, openSlug?: string): Promise<void> {
   const config = resolveConfig({ decksDir: opts.positional[1], assetRoot: opts.assetRoot })
-  const { serve } = await import('../server/serve.mjs')
+  const { serve } = await import('../server/serve.ts')
 
   const running = await serve({ config, port: opts.port ?? 5290, host: opts.host ?? '127.0.0.1' })
 
-  const decks = (await fsp.readdir(config.decksDir).catch(() => [])).filter(
+  const decks = (await fsp.readdir(config.decksDir).catch(() => [] as string[])).filter(
     (n) => n.endsWith('.md') && !n.startsWith('.'),
   )
 
-  console.log(`\n  deck ${pkg.version}`)
+  console.log(`\n  deck ${VERSION}`)
   console.log(`  decks   ${config.decksDir}`)
   if (config.assetRoot !== config.decksDir) console.log(`  assets  ${config.assetRoot}`)
   console.log(`  ready   ${running.url}\n`)
@@ -127,61 +134,62 @@ async function cmdServe(opts, openSlug) {
   const url = openSlug ? `${running.url}/#/${encodeURIComponent(openSlug)}/1` : running.url
   if (opts.open) openBrowser(url)
 
-  const bye = () => {
-    running.close().then(() => process.exit(0))
+  const bye = (): void => {
+    void running.close().then(() => process.exit(0))
   }
   process.on('SIGINT', bye)
   process.on('SIGTERM', bye)
 }
 
-async function cmdExport(opts, rest) {
-  const config = resolveConfig({ decksDir: undefined, assetRoot: opts.assetRoot })
-  const script = path.join(ROOT, 'scripts', 'export.mjs')
-  const child = spawn(process.execPath, [script, ...rest], {
+function cmdExport(opts: Options, rest: string[]): void {
+  const config = resolveConfig({ assetRoot: opts.assetRoot })
+  const child = spawn(process.execPath, [EXPORT_SCRIPT, ...rest], {
     stdio: 'inherit',
-    cwd: ROOT,
+    cwd: PKG_ROOT,
     env: { ...process.env, DECKS_DIR: config.decksDir, ASSET_ROOT: config.assetRoot },
   })
   child.on('exit', (code) => process.exit(code ?? 0))
 }
 
-async function cmdMcp(opts) {
+async function cmdMcp(opts: Options): Promise<void> {
   const config = resolveConfig({ decksDir: opts.positional[1], assetRoot: opts.assetRoot })
-  const { startMcpServer } = await import('../mcp/server.mjs')
+  const { startMcpServer } = await import('../mcp/server.ts')
   await startMcpServer(config)
 }
 
 const raw = process.argv.slice(2)
 // Everything after `export` belongs to the export script, not to deck's own
 // flag parser — `deck export my-deck 0,7 --app` must pass those through intact.
-const exportAt = raw.indexOf('export')
-const own = exportAt === 0 ? ['export'] : raw
-const passthrough = exportAt === 0 ? raw.slice(1) : []
+const isExport = raw[0] === 'export'
+const own = isExport ? ['export'] : raw
+const passthrough = isExport ? raw.slice(1) : []
 
-let opts
+let opts: Options
 try {
   opts = parseArgs(own)
 } catch (err) {
-  console.error(`\n  ${err.message}\n${HELP}`)
+  console.error(`\n  ${err instanceof Error ? err.message : err}\n${HELP}`)
   process.exit(1)
 }
 
 if (opts.help) {
   console.log(HELP)
 } else if (opts.version) {
-  console.log(pkg.version)
+  console.log(VERSION)
 } else {
-  const command = ['new', 'export', 'mcp'].includes(opts.positional[0])
-    ? opts.positional[0]
-    : 'serve'
+  const first = opts.positional[0]
+  const command =
+    first === 'new' || first === 'export' || first === 'mcp' ? first : ('serve' as const)
   // `deck ~/notes` has the directory in slot 0; the serve path reads slot 1.
   if (command === 'serve') opts.positional = ['serve', ...opts.positional]
 
-  const run = { new: cmdNew, export: () => cmdExport(opts, passthrough), mcp: cmdMcp, serve: cmdServe }
   try {
-    await run[command](opts)
+    if (command === 'new') await cmdNew(opts)
+    else if (command === 'export') cmdExport(opts, passthrough)
+    else if (command === 'mcp') await cmdMcp(opts)
+    else await cmdServe(opts)
   } catch (err) {
-    console.error(`\n  ${err?.message ?? err}\n`)
+    console.error(`\n  ${err instanceof Error ? err.message : err}\n`)
     process.exit(1)
   }
 }

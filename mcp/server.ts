@@ -1,21 +1,27 @@
-import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import path from 'node:path'
 import { McpServer } from '@modelcontextprotocol/server'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import * as z from 'zod/v4'
-import { createStore } from '../server/store.mjs'
-import { splitSlides, firstHeading } from '../server/slides.mjs'
-import { SYNTAX } from './syntax.mjs'
+import { createStore } from '../server/store.ts'
+import { splitSlides, firstHeading } from '../server/slides.ts'
+import { EXPORT_SCRIPT, PKG_ROOT, readPackageVersion } from '../server/paths.ts'
+import type { DeckConfig } from '../server/config.ts'
+import type { RunningServer } from '../server/serve.ts'
+import { SYNTAX } from './syntax.ts'
 
-const HERE = path.dirname(fileURLToPath(import.meta.url))
-const ROOT = path.join(HERE, '..')
+const text = (s: string) => ({ content: [{ type: 'text' as const, text: s }] })
+const fail = (s: string) => ({ content: [{ type: 'text' as const, text: s }], isError: true })
 
-const text = (s) => ({ content: [{ type: 'text', text: s }] })
-const fail = (s) => ({ content: [{ type: 'text', text: s }], isError: true })
+interface Outline {
+  slug: string
+  title: string
+  slides: number
+  headings: string[]
+}
 
 /** Slide count and title without rendering anything — the outline of a deck. */
-function outline(slug, raw) {
+function outline(slug: string, raw: string): Outline {
   const slides = splitSlides(raw).filter((b) => b.trim().length > 0)
   return {
     slug,
@@ -25,12 +31,16 @@ function outline(slug, raw) {
   }
 }
 
-export function createDeckMcpServer(config) {
+const message = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+
+export function createDeckMcpServer(config: DeckConfig): McpServer {
   const store = createStore(config)
-  const server = new McpServer({ name: 'deck', version: '0.2.0' })
+  // Read, never hardcoded: a version literal here silently drifts from the
+  // package the client actually installed.
+  const server = new McpServer({ name: 'deck', version: readPackageVersion() })
 
   /** One viewer per MCP process — a second open_deck returns the first one's URL. */
-  const viewer = { running: null }
+  const viewer: { running: RunningServer | null } = { running: null }
 
   server.registerTool(
     'deck_syntax',
@@ -61,13 +71,15 @@ export function createDeckMcpServer(config) {
     'read_deck',
     {
       description: 'Read one deck as raw markdown.',
-      inputSchema: z.object({ slug: z.string().describe('Filename without .md, e.g. launch-week') }),
+      inputSchema: z.object({
+        slug: z.string().describe('Filename without .md, e.g. launch-week'),
+      }),
     },
     async ({ slug }) => {
       try {
         return text(await store.readDeck(slug))
       } catch (err) {
-        return fail(err.message)
+        return fail(message(err))
       }
     },
   )
@@ -78,9 +90,7 @@ export function createDeckMcpServer(config) {
       description:
         'Write a whole deck. Creates it if new. Call deck_syntax first if you have not already. Overwriting an existing deck requires overwrite:true, and replaces the entire file — read_deck first if you mean to keep any of it.',
       inputSchema: z.object({
-        slug: z
-          .string()
-          .describe('Filename without .md. Lowercase with hyphens, e.g. launch-week'),
+        slug: z.string().describe('Filename without .md. Lowercase with hyphens, e.g. launch-week'),
         content: z.string().describe('The complete markdown for the deck'),
         overwrite: z
           .boolean()
@@ -92,18 +102,19 @@ export function createDeckMcpServer(config) {
       try {
         if (overwrite) {
           const { created } = await store.writeDeck(slug, content)
-          const o = outline(slug, content)
-          return text(`${created ? 'Created' : 'Replaced'} ${slug}.md — ${o.slides} slides.`)
+          return text(
+            `${created ? 'Created' : 'Replaced'} ${slug}.md — ${outline(slug, content).slides} slides.`,
+          )
         }
         await store.createDeck(slug, content)
         return text(`Created ${slug}.md — ${outline(slug, content).slides} slides.`)
       } catch (err) {
-        if (err.status === 409) {
+        if (err instanceof Error && 'status' in err && err.status === 409) {
           return fail(
             `${slug}.md already exists. Read it with read_deck, then call write_deck again with overwrite:true if you mean to replace it.`,
           )
         }
-        return fail(err.message)
+        return fail(message(err))
       }
     },
   )
@@ -129,7 +140,7 @@ export function createDeckMcpServer(config) {
         await store.writeDeck(slug, joined)
         return text(`Appended to ${slug}.md — now ${outline(slug, joined).slides} slides.`)
       } catch (err) {
-        return fail(err.message)
+        return fail(message(err))
       }
     },
   )
@@ -146,12 +157,12 @@ export function createDeckMcpServer(config) {
     },
     async ({ slug, port }) => {
       try {
-        const { serve } = await import('../server/serve.mjs')
+        const { serve } = await import('../server/serve.ts')
         if (!viewer.running) viewer.running = await serve({ config, port: port ?? 5290 })
         const base = viewer.running.url
         return text(slug ? `${base}/#/${encodeURIComponent(slug)}/1` : base)
       } catch (err) {
-        return fail(`Could not start the viewer: ${err.message}`)
+        return fail(`Could not start the viewer: ${message(err)}`)
       }
     },
   )
@@ -170,29 +181,32 @@ export function createDeckMcpServer(config) {
       }),
     },
     async ({ slug, slides }) => {
-      const args = [path.join(ROOT, 'scripts', 'export.mjs'), slug]
+      const args = [EXPORT_SCRIPT, slug]
       if (slides) args.push(slides)
-      const out = path.join(ROOT, 'exports')
+      const out = path.join(PKG_ROOT, 'exports')
 
-      const result = await new Promise((resolve) => {
-        const child = spawn(process.execPath, args, {
-          cwd: ROOT,
-          env: {
-            ...process.env,
-            DECKS_DIR: config.decksDir,
-            ASSET_ROOT: config.assetRoot,
-            EXPORT_OUT: out,
-          },
-        })
-        let stdout = ''
-        let stderr = ''
-        child.stdout.on('data', (d) => (stdout += d))
-        child.stderr.on('data', (d) => (stderr += d))
-        child.on('error', (err) => resolve({ code: 1, stdout, stderr: String(err) }))
-        child.on('close', (code) => resolve({ code, stdout, stderr }))
-      })
+      const result = await new Promise<{ code: number; stdout: string; stderr: string }>(
+        (resolve) => {
+          const child = spawn(process.execPath, args, {
+            cwd: PKG_ROOT,
+            env: {
+              ...process.env,
+              DECKS_DIR: config.decksDir,
+              ASSET_ROOT: config.assetRoot,
+              EXPORT_OUT: out,
+            },
+          })
+          let stdout = ''
+          let stderr = ''
+          child.stdout.on('data', (d) => (stdout += d))
+          child.stderr.on('data', (d) => (stderr += d))
+          child.on('error', (err) => resolve({ code: 1, stdout, stderr: String(err) }))
+          child.on('close', (code) => resolve({ code: code ?? 0, stdout, stderr }))
+        },
+      )
 
-      if (result.code !== 0) return fail(result.stderr.trim() || result.stdout.trim() || 'export failed')
+      if (result.code !== 0)
+        return fail(result.stderr.trim() || result.stdout.trim() || 'export failed')
       return text(`${result.stdout.trim()}\n\nWritten to ${out}`)
     },
   )
@@ -209,15 +223,15 @@ export function createDeckMcpServer(config) {
  * for the session, so this waits on the input stream itself. Returning straight
  * away would end the CLI process and take the server down with it.
  */
-export async function startMcpServer(config) {
+export async function startMcpServer(config: DeckConfig): Promise<void> {
   console.error(`deck MCP server on stdio — decks: ${config.decksDir}`)
   const handle = serveStdio(() => createDeckMcpServer(config))
 
-  await new Promise((resolve) => {
-    process.stdin.on('close', resolve)
-    process.stdin.on('end', resolve)
-    process.on('SIGINT', resolve)
-    process.on('SIGTERM', resolve)
+  await new Promise<void>((resolve) => {
+    process.stdin.on('close', () => resolve())
+    process.stdin.on('end', () => resolve())
+    process.on('SIGINT', () => resolve())
+    process.on('SIGTERM', () => resolve())
   })
   await handle.close()
 }

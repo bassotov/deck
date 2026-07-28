@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+
+    "outDir": "lib",
+    "rootDir": ".",
+    /* The `.ts` sources are not published, so a plain source map would point at
+       files that are not there. Inlining them keeps a stack trace readable from
+       an installed copy. */
+    "sourceMap": true,
+    "inlineSources": true,
+    "declaration": false,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": false,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+
+    /* Imports are written with the real `.ts` extension and emitted as `.js`,
+       so the source says what the file is called and Node still gets a
+       specifier it can resolve. */
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["server", "bin", "mcp", "scripts"]
+}

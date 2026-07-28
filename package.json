@@ -23,13 +23,10 @@
     "mcp-server"
   ],
   "bin": {
-    "deck": "bin/deck.mjs"
+    "deck": "lib/bin/deck.js"
   },
   "files": [
-    "bin",
-    "server",
-    "mcp",
-    "scripts",
+    "lib",
     "dist",
     "README.md",
     "LICENSE"
@@ -39,13 +36,15 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run build:client && npm run build:node",
+    "build:client": "vite build",
+    "build:node": "tsc -p tsconfig.node.json",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
-    "export": "node scripts/export.mjs",
-    "start": "node bin/deck.mjs",
-    "mcp": "node bin/deck.mjs mcp",
-    "prepublishOnly": "npm run build"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "export": "npm run build && node lib/scripts/export.js",
+    "start": "npm run build && node lib/bin/deck.js",
+    "mcp": "npm run build && node lib/bin/deck.js mcp",
+    "prepublishOnly": "npm run typecheck && npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
