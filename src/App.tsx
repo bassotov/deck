@@ -470,6 +470,48 @@ export default function App() {
     setSelectedIds(copies.map((el) => el.id))
   }, [commitMany, selected])
 
+  /**
+   * The in-memory ink clipboard — never the OS clipboard, so no custom MIME
+   * type to invent. It lives here rather than in `InkLayer`, which remounts on
+   * every slide change (its `key` is `${activeSlug}:${slide.key}`): a clipboard
+   * inside it could never survive a slide change, and reusing the same mark
+   * across slides is the whole reason this exists. `slug`/`slideKey` record
+   * where the copy was made, so paste can tell same-slide from cross-slide;
+   * `pastes` drives the cascade and resets on every fresh copy.
+   */
+  const clipboard = useRef<{ slug: string; slideKey: string; els: InkEl[]; pastes: number } | null>(
+    null,
+  )
+
+  const copySelection = useCallback(() => {
+    if (!selected.length || !slide || !activeSlug) return
+    // `copyEl` at a zero offset still deep-copies (fresh point/from/to arrays,
+    // fresh id) — later edits to the originals can't reach back into what's
+    // sitting on the clipboard.
+    clipboard.current = {
+      slug: activeSlug,
+      slideKey: slide.key,
+      els: selected.map((el) => copyEl(el, 0, 0)),
+      pastes: 0,
+    }
+  }, [selected, slide, activeSlug])
+
+  const pasteClipboard = useCallback(() => {
+    const clip = clipboard.current
+    if (!clip || !slide || !activeSlug) return
+    const sameSlide = clip.slug === activeSlug && clip.slideKey === slide.key
+    // Cross-slide paste lands at the copied coordinates untouched — the point
+    // of copying an arrow on one slide and pasting it on another is putting the
+    // same mark in the same place. Pasting back onto the slide it was copied
+    // from cascades like a repeated duplicate, so each paste still reads as a
+    // new object rather than as one that failed to move.
+    const offset = sameSlide ? DUPLICATE_OFFSET * ((clip.pastes % 5) + 1) : 0
+    const pasted = clip.els.map((el) => copyEl(el, offset, offset))
+    commitMany(pasted)
+    setSelectedIds(pasted.map((el) => el.id))
+    if (sameSlide) clip.pastes += 1
+  }, [slide, activeSlug, commitMany])
+
   const undo = useCallback(() => {
     const p = pastRef.current
     if (!p.length) return
@@ -581,13 +623,21 @@ export default function App() {
         i.type.startsWith('image/'),
       )
       const blob = item?.getAsFile()
-      if (!blob) return
+      if (blob) {
+        e.preventDefault()
+        void dropImage(blob)
+        return
+      }
+      // No image on the OS clipboard: this is where a real ⌘V lands, so the
+      // in-memory ink clipboard is pasted from here rather than from the
+      // keydown handler — wiring ⌘V there too would paste it twice.
+      if (!clipboard.current) return
       e.preventDefault()
-      void dropImage(blob)
+      pasteClipboard()
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
-  }, [dropImage])
+  }, [dropImage, pasteClipboard])
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
@@ -618,6 +668,17 @@ export default function App() {
         e.preventDefault()
         return selectAll()
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c') {
+        e.preventDefault()
+        return copySelection()
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
+        // Otherwise the browser opens its "bookmark this page" dialog.
+        e.preventDefault()
+        return duplicateSelected()
+      }
+      // ⌘V is deliberately not handled here — a real paste already fires the
+      // window `paste` listener above, which is where it's wired.
       if (e.metaKey || e.ctrlKey || e.altKey) return
 
       // Backspace would otherwise walk the browser back a page.
@@ -696,8 +757,10 @@ export default function App() {
   }, [
     applyStroke,
     clearSlide,
+    copySelection,
     cycleColor,
     deleteSelected,
+    duplicateSelected,
     focus,
     go,
     pickTool,
@@ -833,6 +896,7 @@ export default function App() {
                   onSelect={setSelectedIds}
                   onCommit={commit}
                   onUpdateMany={updateMany}
+                  onCommitMany={commitMany}
                   onErase={erase}
                 />
               )}

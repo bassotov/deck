@@ -6,6 +6,7 @@ import {
   boundsOfMany,
   boxFromDrag,
   boxesIntersect,
+  copyEl,
   resizeBox,
   scaleEl,
   translateEl,
@@ -16,10 +17,14 @@ import {
  * discriminated union so the type system enforces that rather than discipline.
  * A resize carries the two boxes rather than a size, because that pair is
  * exactly what `scaleEl` maps every kind of element through.
+ *
+ * `duplicate` is decided once, at pointerdown (Option/Alt held), and rides
+ * along for the whole drag: the originals never move, only a preview copy
+ * does, and it's what `onElUp` commits instead of translating the originals.
  */
 export type Interaction =
   | { mode: 'idle' }
-  | { mode: 'dragging'; ids: string[]; dx: number; dy: number }
+  | { mode: 'dragging'; ids: string[]; dx: number; dy: number; duplicate: boolean }
   | { mode: 'resizing'; ids: string[]; from: Box; to: Box }
 
 const IDLE: Interaction = { mode: 'idle' }
@@ -44,6 +49,10 @@ interface Args {
   /** Batch commit — a group drag or resize touches several elements but must
    *  land as one history entry, whether the group has one member or ten. */
   onUpdateMany: (els: InkEl[]) => void
+  /** Where an Option-drag lands instead: these are brand-new elements (fresh
+   *  ids), not edits to the ones that were dragged, so it's the "add" batch
+   *  commit rather than the "update" one `onUpdateMany` is. */
+  onDuplicateMany: (els: InkEl[]) => void
   toStage: (clientX: number, clientY: number) => [number, number]
 }
 
@@ -55,6 +64,7 @@ export function useSelectionInteraction({
   selectedIds,
   onSelect,
   onUpdateMany,
+  onDuplicateMany,
   toStage,
 }: Args) {
   const [interaction, setInteraction] = useState<Interaction>(IDLE)
@@ -76,6 +86,10 @@ export function useSelectionInteraction({
 
     const already = selectedIds.includes(el.id)
     const toggle = e.shiftKey || e.metaKey
+    // Option/Alt is read once, here, rather than every frame — releasing it
+    // mid-drag must not flip a copy into a move (or back) partway through the
+    // gesture, which would read as a bug rather than a held-key choice.
+    const duplicate = e.altKey
 
     if (toggle) {
       // Shift/Cmd-click toggles this element's membership — but only if the
@@ -92,7 +106,13 @@ export function useSelectionInteraction({
 
     // The set that moves if this becomes a drag: the full selection when the
     // press landed on one of its members, otherwise just the pressed element.
-    setInteraction({ mode: 'dragging', ids: already ? selectedIds : [el.id], dx: 0, dy: 0 })
+    setInteraction({
+      mode: 'dragging',
+      ids: already ? selectedIds : [el.id],
+      dx: 0,
+      dy: 0,
+      duplicate,
+    })
   }
 
   const onElMove = (e: React.PointerEvent<SVGGElement>) => {
@@ -111,15 +131,23 @@ export function useSelectionInteraction({
   const onElUp = (e: React.PointerEvent<SVGGElement>) => {
     if (interaction.mode !== 'dragging') return
     e.currentTarget.releasePointerCapture?.(e.pointerId)
-    const { ids, dx, dy } = interaction
+    const { ids, dx, dy, duplicate } = interaction
     const toggle = pendingToggle.current
     pendingToggle.current = null
 
     if (Math.hypot(dx, dy) > 1) {
-      // A real drag: move every dragged element together and skip the toggle
-      // entirely — a drag is not a click, so Shift's other meaning doesn't apply.
-      const moved = elements.filter((el) => ids.includes(el.id)).map((el) => translateEl(el, dx, dy))
-      onUpdateMany(moved)
+      // A real drag: skip the toggle entirely — a drag is not a click, so
+      // Shift's other meaning doesn't apply.
+      const dragged = elements.filter((el) => ids.includes(el.id))
+      if (duplicate) {
+        // The originals stay exactly where they were pressed; only the copies
+        // land at the drop point, and they — not the originals — end up selected.
+        const copies = dragged.map((el) => copyEl(el, dx, dy))
+        onDuplicateMany(copies)
+        onSelect(copies.map((el) => el.id))
+      } else {
+        onUpdateMany(dragged.map((el) => translateEl(el, dx, dy)))
+      }
     } else if (toggle) {
       onSelect(
         toggle.wasSelected

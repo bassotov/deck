@@ -30,6 +30,9 @@ interface Props {
   /** Batch commit for a group drag or resize — every element it touched lands as
    *  one undo entry. */
   onUpdateMany: (els: InkEl[]) => void
+  /** Batch commit for brand-new elements — where an Option-drag's copies land,
+   *  since they're fresh elements rather than edits to the ones dragged. */
+  onCommitMany: (els: InkEl[]) => void
   onErase: (ids: string[]) => void
 }
 
@@ -42,6 +45,7 @@ export default function InkLayer({
   onSelect,
   onCommit,
   onUpdateMany,
+  onCommitMany,
   onErase,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -100,6 +104,7 @@ export default function InkLayer({
     selectedIds,
     onSelect,
     onUpdateMany,
+    onDuplicateMany: onCommitMany,
     toStage,
   })
 
@@ -112,13 +117,19 @@ export default function InkLayer({
    */
   const committed = useMemo(
     () =>
-      elements.map((el) => {
-        const moving =
+      elements.flatMap((el) => {
+        const dragging =
           interaction.mode === 'dragging' && interaction.ids.includes(el.id) ? interaction : null
+        // Option-drag leaves the pressed element exactly where it was — the
+        // move-transform below is skipped for it, and a second, non-interactive
+        // copy (rendered after this one) carries it instead. That's also what
+        // keeps pointer capture on the untouched original for the rest of the
+        // gesture, since it's still the element the drag started on.
+        const moving = dragging && !dragging.duplicate ? dragging : null
         // A live resize renders scaled but still drives off the committed
         // element, so one drag is one resize rather than a feedback loop.
         const live = resizePreview(el, interaction)
-        return (
+        const node = (
           <g
             key={el.id}
             className={selecting ? 'ink-el' : undefined}
@@ -135,6 +146,21 @@ export default function InkLayer({
                 render below. */}
           </g>
         )
+        if (!dragging?.duplicate) return [node]
+        // The moving preview of the copy an Option-drag will commit on release —
+        // the original staying put beside it is what makes "this duplicates"
+        // legible mid-gesture, instead of looking like a drag that silently
+        // teleports back at the end.
+        return [
+          node,
+          <g
+            key={`${el.id}:dup-preview`}
+            transform={`translate(${dragging.dx} ${dragging.dy})`}
+            pointerEvents="none"
+          >
+            <Visual el={live} />
+          </g>,
+        ]
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [elements, selecting, selectedIds, interaction],
