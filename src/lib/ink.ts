@@ -425,6 +425,36 @@ export function boundsOfMany(els: InkEl[]): Box {
   }
 }
 
+/** Stage units of an element's own box that must stay inside the stage — small
+ *  enough that a near-edge placement doesn't visibly jump, large enough to
+ *  still be a grabbable target on a trackpad. `.stage` clips everything past
+ *  its edge (`overflow: hidden`), so a mark pushed fully outside it is gone
+ *  for good — nothing left to click to bring it back. */
+export const STAGE_MARGIN = 24
+
+/**
+ * How far a group can actually move by `[dx, dy]` before a margin of its
+ * combined bounding box would cross the stage edge — the same delta for every
+ * element in the group, so a multi-selection, a paste, or a duplicate keeps
+ * its relative layout instead of each member clamping to a different edge.
+ * Returns the delta unchanged when it doesn't push the group past the margin.
+ * Resize never routes through this — a handle drag is already bounded by the
+ * pointer driving it.
+ */
+export function clampDelta(elements: InkEl[], dx: number, dy: number): [number, number] {
+  if (!elements.length) return [dx, dy]
+  const box = boundsOfMany(elements)
+  const x = box.x + dx
+  const y = box.y + dy
+  let cx = dx
+  let cy = dy
+  if (x + box.w < STAGE_MARGIN) cx = STAGE_MARGIN - box.w - box.x
+  else if (x > STAGE_W - STAGE_MARGIN) cx = STAGE_W - STAGE_MARGIN - box.x
+  if (y + box.h < STAGE_MARGIN) cy = STAGE_MARGIN - box.h - box.y
+  else if (y > STAGE_H - STAGE_MARGIN) cy = STAGE_H - STAGE_MARGIN - box.y
+  return [cx, cy]
+}
+
 /** Normalize a free-form drag into an axis-aligned box, whichever corner it started from. */
 export function boxFromDrag(from: [number, number], to: [number, number]): Box {
   const x = Math.min(from[0], to[0])

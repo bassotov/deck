@@ -37,6 +37,11 @@ interface Props {
    *  since they're fresh elements rather than edits to the ones dragged. */
   onCommitMany: (els: InkEl[]) => void
   onErase: (ids: string[]) => void
+  /** Flags a stroke, a drag, or a handle resize as in flight — App uses this to
+   *  ignore a keyboard tool switch or slide change until the gesture ends,
+   *  since pointer capture would otherwise keep delivering it to a tool (or a
+   *  slide) that's no longer current. */
+  onGestureChange: (active: boolean) => void
 }
 
 export default function InkLayer({
@@ -50,6 +55,7 @@ export default function InkLayer({
   onUpdateMany,
   onCommitMany,
   onErase,
+  onGestureChange,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -92,6 +98,7 @@ export default function InkLayer({
       editing,
       startCreate,
       commitText,
+      onGestureChange,
     })
 
   const {
@@ -114,6 +121,7 @@ export default function InkLayer({
     onUpdateMany,
     onDuplicateMany: onCommitMany,
     toStage,
+    onGestureChange,
   })
 
   /** The last element a plain *click* (not a drag) landed on, and when. Read

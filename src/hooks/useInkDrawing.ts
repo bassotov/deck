@@ -17,6 +17,9 @@ interface Args {
   editing: TextDraft | null
   startCreate: (x: number, y: number) => void
   commitText: () => void
+  /** Flags a stroke as in flight, so a keyboard tool switch or slide change
+   *  can't land mid-gesture and corrupt or destroy it. */
+  onGestureChange: (active: boolean) => void
 }
 
 /** The new-element authoring state and the pointer trio that drives it, for
@@ -32,9 +35,17 @@ export function useInkDrawing({
   editing,
   startCreate,
   commitText,
+  onGestureChange,
 }: Args) {
   const drawing = useRef(false)
   const start = useRef<[number, number]>([0, 0])
+  /** The tool this gesture started with. Pointer capture keeps delivering
+   *  move/up events to this hook after a keyboard tool switch mid-stroke, so
+   *  branching on the live `tool` prop there could reinterpret a pen stroke as
+   *  an eraser drag, or drop it silently once the commit condition no longer
+   *  matches. `onPointerDown` still reads the live `tool` — that's what decides
+   *  whether a new gesture starts at all — but move/up read this instead. */
+  const gestureTool = useRef<Tool>(tool)
 
   const [points, setPoints] = useState<number[][] | null>(null)
   const [dragTo, setDragTo] = useState<[number, number] | null>(null)
@@ -71,8 +82,10 @@ export function useInkDrawing({
 
     if (tool === 'text') return startCreate(x, y)
 
+    gestureTool.current = tool
     e.currentTarget.setPointerCapture(e.pointerId)
     drawing.current = true
+    onGestureChange(true)
 
     if (tool === 'eraser') return erase(x, y)
     if (tool === 'arrow' || tool === 'shape') return setDragTo([x, y])
@@ -82,14 +95,15 @@ export function useInkDrawing({
   const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
     if (!drawing.current) return
     const [x, y] = toStage(e.clientX, e.clientY)
+    const gesture = gestureTool.current
 
-    if (tool === 'eraser') return erase(x, y)
+    if (gesture === 'eraser') return erase(x, y)
 
-    if (tool === 'arrow') {
+    if (gesture === 'arrow') {
       return setDragTo(e.shiftKey ? snapAngle(start.current, [x, y]) : [x, y])
     }
 
-    if (tool === 'shape') {
+    if (gesture === 'shape') {
       if (!e.shiftKey) return setDragTo([x, y])
       // Shift makes a square/circle, or snaps a line's angle.
       return setDragTo(
@@ -122,13 +136,15 @@ export function useInkDrawing({
   const onPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
     if (!drawing.current) return
     drawing.current = false
+    onGestureChange(false)
     e.currentTarget.releasePointerCapture?.(e.pointerId)
+    const gesture = gestureTool.current
 
-    if ((tool === 'arrow' || tool === 'shape') && dragTo) {
+    if ((gesture === 'arrow' || gesture === 'shape') && dragTo) {
       const [x1, y1] = start.current
       if (Math.hypot(dragTo[0] - x1, dragTo[1] - y1) > 14) {
         onCommit(
-          tool === 'arrow'
+          gesture === 'arrow'
             ? {
                 id: uid(),
                 kind: 'arrow',
@@ -161,8 +177,8 @@ export function useInkDrawing({
       return
     }
 
-    if (points && points.length > 1 && (tool === 'pen' || tool === 'highlighter')) {
-      onCommit({ id: uid(), kind: 'stroke', brush: tool, style: brushStyle, points })
+    if (points && points.length > 1 && (gesture === 'pen' || gesture === 'highlighter')) {
+      onCommit({ id: uid(), kind: 'stroke', brush: gesture, style: brushStyle, points })
     }
     setPoints(null)
   }

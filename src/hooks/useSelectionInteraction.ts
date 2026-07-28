@@ -6,6 +6,7 @@ import {
   boundsOfMany,
   boxFromDrag,
   boxesIntersect,
+  clampDelta,
   copyEl,
   resizeBox,
   scaleEl,
@@ -54,6 +55,10 @@ interface Args {
    *  commit rather than the "update" one `onUpdateMany` is. */
   onDuplicateMany: (els: InkEl[]) => void
   toStage: (clientX: number, clientY: number) => [number, number]
+  /** Flags a drag or a handle resize as in flight, so a keyboard tool switch or
+   *  slide change can't land mid-gesture and corrupt it — see the same signal
+   *  from `useInkDrawing` for a stroke. */
+  onGestureChange: (active: boolean) => void
 }
 
 /** Existing-element manipulation for the cursor tool: drag to move (solo or as a
@@ -66,6 +71,7 @@ export function useSelectionInteraction({
   onUpdateMany,
   onDuplicateMany,
   toStage,
+  onGestureChange,
 }: Args) {
   const [interaction, setInteraction] = useState<Interaction>(IDLE)
   const dragFrom = useRef<[number, number]>([0, 0])
@@ -113,6 +119,7 @@ export function useSelectionInteraction({
       dy: 0,
       duplicate,
     })
+    onGestureChange(true)
   }
 
   const onElMove = (e: React.PointerEvent<SVGGElement>) => {
@@ -130,6 +137,7 @@ export function useSelectionInteraction({
 
   const onElUp = (e: React.PointerEvent<SVGGElement>) => {
     if (interaction.mode !== 'dragging') return
+    onGestureChange(false)
     e.currentTarget.releasePointerCapture?.(e.pointerId)
     const { ids, dx, dy, duplicate } = interaction
     const toggle = pendingToggle.current
@@ -139,14 +147,17 @@ export function useSelectionInteraction({
       // A real drag: skip the toggle entirely — a drag is not a click, so
       // Shift's other meaning doesn't apply.
       const dragged = elements.filter((el) => ids.includes(el.id))
+      // Clamped as one group so a multi-drag keeps its relative layout instead
+      // of each member clamping to a different edge — see `clampDelta`.
+      const [cdx, cdy] = clampDelta(dragged, dx, dy)
       if (duplicate) {
         // The originals stay exactly where they were pressed; only the copies
         // land at the drop point, and they — not the originals — end up selected.
-        const copies = dragged.map((el) => copyEl(el, dx, dy))
+        const copies = dragged.map((el) => copyEl(el, cdx, cdy))
         onDuplicateMany(copies)
         onSelect(copies.map((el) => el.id))
       } else {
-        onUpdateMany(dragged.map((el) => translateEl(el, dx, dy)))
+        onUpdateMany(dragged.map((el) => translateEl(el, cdx, cdy)))
       }
     } else if (toggle) {
       onSelect(
@@ -187,6 +198,7 @@ export function useSelectionInteraction({
       grab: [x - (box.x + grip.fx * box.w), y - (box.y + grip.fy * box.h)],
     }
     setInteraction({ mode: 'resizing', ids, from: box, to: box })
+    onGestureChange(true)
   }
 
   const onHandleMove = (e: React.PointerEvent<SVGRectElement>) => {
@@ -203,6 +215,7 @@ export function useSelectionInteraction({
   const onHandleUp = (e: React.PointerEvent<SVGRectElement>) => {
     const from = sizeFrom.current
     if (interaction.mode !== 'resizing' || !from) return
+    onGestureChange(false)
     e.currentTarget.releasePointerCapture?.(e.pointerId)
     const { to } = interaction
     sizeFrom.current = null

@@ -10,12 +10,14 @@ import {
   SHAPE_ORDER,
   TOOL_ORDER,
   baseWidth,
+  clampDelta,
   copyEl,
   makeDrawStyle,
   makeStyle,
   normalizeSlide,
   placeImage,
   restyle,
+  translateEl,
   uid,
 } from './lib/ink'
 import type { DrawStyle, InkEl, ShapeKind, Story, StoryInk, Tool } from './types'
@@ -24,6 +26,32 @@ const HISTORY_LIMIT = 60
 
 /** Far enough that a duplicate reads as a copy and not as a mark that failed to move. */
 const DUPLICATE_OFFSET = 24
+
+/** Arrow-key nudge, in stage units — Shift steps ten times further. */
+const NUDGE = 4
+const NUDGE_SHIFT = 20
+
+/** Digit tool-switches, the letter aliases, and slide navigation — ignored
+ *  while a gesture (a stroke, a drag, or a handle resize) is in flight, since
+ *  switching mid-gesture is exactly what corrupts or destroys it. */
+const GESTURE_LOCKED_KEYS = new Set([
+  'v',
+  'p',
+  'h',
+  'a',
+  's',
+  't',
+  'e',
+  'arrowright',
+  'arrowleft',
+  'arrowup',
+  'arrowdown',
+  ' ',
+  'j',
+  'k',
+  'home',
+  'end',
+])
 
 /** A sticky toast stays until it is replaced — a save that failed has to be seen. */
 interface Toast {
@@ -123,6 +151,23 @@ export default function App() {
     setFutureState(next)
   }, [])
 
+  /** The one place `inkCounts` is derived from what's actually landing in
+   *  `ink` — an edit, an undo, or a redo all route through this, so the
+   *  sidebar's per-deck count can't drift the way it did when only `mutate`
+   *  recomputed it and undo/redo quietly bypassed that. */
+  const applyInk = useCallback(
+    (next: StoryInk) => {
+      setInk(next)
+      if (activeSlug) {
+        setInkCounts((c) => ({
+          ...c,
+          [activeSlug]: Object.values(next).reduce((n, els) => n + els.length, 0),
+        }))
+      }
+    },
+    [activeSlug, setInk],
+  )
+
   const [tool, setTool] = useState<Tool>('cursor')
   const [shape, setShape] = useState<ShapeKind>(SHAPE_ORDER[0])
   /** One current style rather than one current colour: every property the bar
@@ -133,6 +178,22 @@ export default function App() {
   const [idle, setIdle] = useState(false)
   const [toast, setToast] = useState<Toast | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+
+  /** Focus mode hides the header — and with it the sidebar toggle — so leaving
+   *  it has to restore whatever the sidebar's state was before entering,
+   *  rather than always leaving it closed. */
+  const sidebarBeforeFocus = useRef(sidebarOpen)
+
+  const enterFocus = useCallback(() => {
+    sidebarBeforeFocus.current = sidebarOpen
+    setSidebarOpen(false)
+    setFocus(true)
+  }, [sidebarOpen])
+
+  const exitFocus = useCallback(() => {
+    setSidebarOpen(sidebarBeforeFocus.current)
+    setFocus(false)
+  }, [])
 
   const dirty = useRef(false)
 
@@ -176,6 +237,20 @@ export default function App() {
     if (window.location.hash !== next) window.history.replaceState(null, '', next)
   }, [activeSlug, index])
 
+  // Back/forward and a hand-edited hash both fire this — the app only ever
+  // writes the hash above via `replaceState`, which never fires it itself, so
+  // there's no loop: this effect's own writes can't re-trigger this listener.
+  useEffect(() => {
+    const onHashChange = () => {
+      const next = readHash()
+      if (!next.slug) return
+      setActiveSlug(next.slug)
+      setIndex(next.index)
+    }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
+
   useEffect(() => {
     if (!activeSlug) return
     let cancelled = false
@@ -190,16 +265,12 @@ export default function App() {
       const loaded: StoryInk = Object.fromEntries(
         Object.entries(data).map(([key, els]) => [key, normalizeSlide(els)]),
       )
-      setInk(loaded)
-      setInkCounts((c) => ({
-        ...c,
-        [activeSlug]: Object.values(loaded).reduce((n, els) => n + els.length, 0),
-      }))
+      applyInk(loaded)
     })
     return () => {
       cancelled = true
     }
-  }, [activeSlug, setInk, setPast, setFuture])
+  }, [activeSlug, applyInk, setPast, setFuture])
 
   /** The (slug, ink) pair the debounce is holding — never the live `activeSlug`,
    *  so a flush writes the storyline the edit was actually made on. */
@@ -259,7 +330,7 @@ export default function App() {
       const prev = inkRef.current
       const updated = next(prev)
       dirty.current = true
-      setInk(updated)
+      applyInk(updated)
       // Still the same gesture: extend the entry that is already on the stack
       // instead of pushing another one beside it.
       if (!coalesce || coalescing.current !== coalesce) {
@@ -267,14 +338,8 @@ export default function App() {
       }
       coalescing.current = coalesce ?? null
       setFuture([])
-      if (activeSlug) {
-        setInkCounts((c) => ({
-          ...c,
-          [activeSlug]: Object.values(updated).reduce((n, els) => n + els.length, 0),
-        }))
-      }
     },
-    [activeSlug, setInk, setPast, setFuture],
+    [applyInk, setPast, setFuture],
   )
 
   /* Batch first, single as the thin wrapper: one gesture is one history entry, whether
@@ -325,6 +390,9 @@ export default function App() {
   const clearSlide = useCallback(() => {
     if (!slide || slideInk.length === 0) return
     mutate((prev) => ({ ...prev, [slide.key]: [] }))
+    // Instant and undoable on purpose — a confirmation dialog mid-recording
+    // would be worse — but it still needs to say so.
+    setToast({ text: 'Slide cleared · ⌘Z to undo' })
   }, [mutate, slide, slideInk.length])
 
   /** Keeps the empty array identical when nothing was selected, so clicking bare
@@ -463,7 +531,8 @@ export default function App() {
 
   const duplicateSelected = useCallback(() => {
     if (!selected.length) return
-    const copies = selected.map((el) => copyEl(el, DUPLICATE_OFFSET, DUPLICATE_OFFSET))
+    const [dx, dy] = clampDelta(selected, DUPLICATE_OFFSET, DUPLICATE_OFFSET)
+    const copies = selected.map((el) => copyEl(el, dx, dy))
     commitMany(copies)
     // The copy is what you go on to move — leaving the original selected would
     // mean every duplicate needs a click before it can be used.
@@ -506,7 +575,8 @@ export default function App() {
     // from cascades like a repeated duplicate, so each paste still reads as a
     // new object rather than as one that failed to move.
     const offset = sameSlide ? DUPLICATE_OFFSET * ((clip.pastes % 5) + 1) : 0
-    const pasted = clip.els.map((el) => copyEl(el, offset, offset))
+    const [dx, dy] = clampDelta(clip.els, offset, offset)
+    const pasted = clip.els.map((el) => copyEl(el, dx, dy))
     commitMany(pasted)
     setSelectedIds(pasted.map((el) => el.id))
     if (sameSlide) clip.pastes += 1
@@ -520,9 +590,9 @@ export default function App() {
     // start a new entry rather than quietly extend the one just undone.
     coalescing.current = null
     setFuture([inkRef.current, ...futureRef.current].slice(0, HISTORY_LIMIT))
-    setInk(p[p.length - 1])
+    applyInk(p[p.length - 1])
     setPast(p.slice(0, -1))
-  }, [setFuture, setInk, setPast])
+  }, [applyInk, setFuture, setPast])
 
   const redo = useCallback(() => {
     const f = futureRef.current
@@ -530,9 +600,9 @@ export default function App() {
     dirty.current = true
     coalescing.current = null
     setPast([...pastRef.current.slice(-HISTORY_LIMIT), inkRef.current])
-    setInk(f[0])
+    applyInk(f[0])
     setFuture(f.slice(1))
-  }, [setFuture, setInk, setPast])
+  }, [applyInk, setFuture, setPast])
 
   /* ----------------------------------------------------------- navigation */
 
@@ -543,6 +613,20 @@ export default function App() {
       setIndex((i) => Math.max(0, Math.min(total - 1, i + delta)))
     },
     [total],
+  )
+
+  /** Arrow keys move the selection when there is one, rather than the slide —
+   *  same clamp as a drag, same history shape as any other edit, but never
+   *  coalesced: a run of held-down nudges undoes one step at a time. Skips the
+   *  history entry entirely when the clamp reduces the move to nothing, so
+   *  holding an arrow into the stage edge doesn't spam undo. */
+  const nudgeSelected = useCallback(
+    (dx: number, dy: number) => {
+      const [cdx, cdy] = clampDelta(selected, dx, dy)
+      if (!cdx && !cdy) return
+      updateMany(selected.map((el) => translateEl(el, cdx, cdy)))
+    },
+    [selected, updateMany],
   )
 
   /** Re-picking the shape tool walks to the next shape — square, oval, … */
@@ -569,7 +653,17 @@ export default function App() {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '')
     if (!slug) return
-    await createStory(slug, TEMPLATE(title))
+    try {
+      await createStory(slug, TEMPLATE(title))
+    } catch (err) {
+      // A 409 means the slug's already taken — the common case, and worth its
+      // own message. Anything else still needs to be seen rather than eaten.
+      const conflict = err instanceof Error && err.message.includes('409')
+      setToast({
+        text: conflict ? `A storyline called ${slug} already exists` : 'Could not create the storyline',
+      })
+      return
+    }
     await load()
     selectStory(slug)
   }, [load, selectStory])
@@ -598,7 +692,7 @@ export default function App() {
           [{ id: uid(), kind: 'image', src, style: makeStyle(), ...placeImage(natural, nth) }],
           true,
         )
-        setToast({ text: src })
+        setToast({ text: `Added ${src}` })
       } catch (err) {
         setToast({ text: err instanceof Error ? err.message : 'Could not add the image' })
       } finally {
@@ -651,6 +745,17 @@ export default function App() {
 
   /* ------------------------------------------------------------- keyboard */
 
+  /** Whether a stroke, a drag, or a handle resize is currently in flight — a
+   *  ref, not state, since it only needs to gate the keydown handler below at
+   *  call time and must never itself trigger a re-render or a re-subscribe.
+   *  Pointer capture keeps delivering that gesture's events to whatever tool
+   *  (or slide) it started on, so a keyboard tool switch or slide navigation
+   *  landing mid-gesture would corrupt or destroy it — see InkLayer. */
+  const gestureActive = useRef(false)
+  const onGestureChange = useCallback((active: boolean) => {
+    gestureActive.current = active
+  }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null
@@ -677,9 +782,24 @@ export default function App() {
         e.preventDefault()
         return duplicateSelected()
       }
+      if ((e.metaKey || e.ctrlKey) && (e.key === ']' || e.key === '[')) {
+        // Same reorder the property bar's Front/Back buttons use.
+        // preventDefault so Ctrl+] doesn't switch tabs and ⌘[ doesn't walk history.
+        e.preventDefault()
+        return reorderSelected(e.key === ']')
+      }
       // ⌘V is deliberately not handled here — a real paste already fires the
       // window `paste` listener above, which is where it's wired.
       if (e.metaKey || e.ctrlKey || e.altKey) return
+
+      // A stroke, a drag, or a handle resize is mid-gesture: pointer capture is
+      // still delivering it to the tool (and slide) it started on, so switching
+      // either out from under it here would corrupt or destroy it — see
+      // InkLayer's `onGestureChange`.
+      if (gestureActive.current && GESTURE_LOCKED_KEYS.has(e.key.toLowerCase())) {
+        e.preventDefault()
+        return
+      }
 
       // Backspace would otherwise walk the browser back a page.
       if (e.key === 'Backspace' || e.key === 'Delete') {
@@ -696,7 +816,7 @@ export default function App() {
         if (e.shiftKey) {
           const c = INK_COLORS[n]
           if (c) applyStroke(c.value)
-        } else {
+        } else if (!gestureActive.current) {
           const t = TOOL_ORDER[n]
           if (t) pickTool(t)
         }
@@ -704,24 +824,42 @@ export default function App() {
       }
 
       switch (e.key) {
-        case 'ArrowRight':
-        case 'ArrowDown':
         case ' ':
         case 'j':
+          // The guaranteed escape hatch: always navigates, selection or not —
+          // arrows below are the ones that nudge.
           e.preventDefault()
           return go(1)
-        case 'ArrowLeft':
-        case 'ArrowUp':
         case 'k':
           e.preventDefault()
           return go(-1)
+        case 'ArrowRight':
+        case 'ArrowLeft':
+        case 'ArrowUp':
+        case 'ArrowDown': {
+          e.preventDefault()
+          // A selection eats the arrows to nudge it; only an empty selection
+          // lets them fall through to slide navigation.
+          if (!selected.length) {
+            return go(e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1)
+          }
+          const step = e.shiftKey ? NUDGE_SHIFT : NUDGE
+          const dx = e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0
+          const dy = e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0
+          return nudgeSelected(dx, dy)
+        }
         case 'Home':
           return setIndex(0)
         case 'End':
           return setIndex(Math.max(0, total - 1))
-        case 'Escape':
-          setTool('cursor')
-          return setFocus(false)
+        case 'Escape': {
+          // One step per press: clear a selection, then reset the tool, then
+          // leave focus — never more than one at once.
+          if (selected.length) return clearSelection()
+          if (tool !== 'cursor') return setTool('cursor')
+          if (focus) return exitFocus()
+          return
+        }
       }
 
       switch (e.key.toLowerCase()) {
@@ -741,13 +879,10 @@ export default function App() {
           return pickTool('eraser')
         case 'x':
           return clearSlide()
-        case 'u':
-          return undo()
         case 'b':
           return setSidebarOpen((v) => !v)
         case 'f':
-          setSidebarOpen((v) => (focus ? v : false))
-          return setFocus((v) => !v)
+          return focus ? exitFocus() : enterFocus()
         case 'c':
           return cycleColor()
       }
@@ -756,16 +891,23 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [
     applyStroke,
+    clearSelection,
     clearSlide,
     copySelection,
     cycleColor,
     deleteSelected,
     duplicateSelected,
+    enterFocus,
+    exitFocus,
     focus,
     go,
+    nudgeSelected,
     pickTool,
     redo,
+    reorderSelected,
     selectAll,
+    selected,
+    tool,
     total,
     undo,
   ])
@@ -850,10 +992,7 @@ export default function App() {
                 {String(total).padStart(2, '0')}
               </span>
               <button
-                onClick={() => {
-                  setSidebarOpen(false)
-                  setFocus(true)
-                }}
+                onClick={enterFocus}
                 title="Focus mode · F"
                 className="label transition-colors hover:text-accent"
               >
@@ -867,9 +1006,7 @@ export default function App() {
             or it lands inside the recording crop. */}
         <div className="relative z-10 flex min-h-0 flex-1 items-center justify-center pr-[92px] pb-6 pl-7">
           <div className="flex flex-col items-center gap-4" style={{ width: stageWidth }}>
-            {/* A press that lands on the slide rather than on an object clears
-                the selection — the ink elements stop propagation. */}
-            <div className="stage w-full" onPointerDown={clearSelection}>
+            <div className="stage w-full">
               {slide ? (
                 <SlideView slide={slide} />
               ) : (
@@ -898,6 +1035,7 @@ export default function App() {
                   onUpdateMany={updateMany}
                   onCommitMany={commitMany}
                   onErase={erase}
+                  onGestureChange={onGestureChange}
                 />
               )}
             </div>

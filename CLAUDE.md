@@ -138,9 +138,15 @@ whose rows all carry a `style` was written by this code, so its order is trusted
 verbatim. One save is all it takes for front/back to stick forever.
 
 `⇧1–4` colour · `C` cycles colour · Shift while drawing snaps to a straight line
-`←/→`, space, scroll — navigate · `⌘Z`/`⇧⌘Z` undo/redo · `X` clear slide
-`⌘B` sidebar · `F` focus mode · `Esc` out
+`⌘]`/`⌘[` front/back · `⌘Z`/`⇧⌘Z` undo/redo · `X` clear slide
+`⌘B` sidebar · `F` focus mode · `Esc` out — clears a selection, then the tool, then focus, one step per press
 
 Digits are read off `e.code`, not `e.key` — Shift+1 arrives as `!` on a Mac layout.
+
+Arrows nudge the selection when one exists (4 stage units, Shift = 20) and navigate
+the slide only when nothing is selected. `space`, `j`, `k` and scroll always navigate
+regardless of selection — the guaranteed escape hatch mid-recording — and every one of
+these, including the digits above, is ignored while a stroke, a drag, or a handle
+resize is still in flight, so a keyboard switch can't land mid-gesture and corrupt it.
 
 The URL carries `#/<slug>/<slide>`, so a deck reopens where it was left.
