@@ -2,20 +2,28 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Sidebar from './components/Sidebar'
 import SlideView from './components/SlideView'
 import InkLayer from './components/InkLayer'
+import PropertyBar from './components/PropertyBar'
 import ToolRail from './components/ToolRail'
 import { addImage, createStory, fetchInk, fetchStories, saveInk } from './lib/api'
 import {
   INK_COLORS,
   SHAPE_ORDER,
   TOOL_ORDER,
+  baseWidth,
+  copyEl,
+  makeDrawStyle,
   makeStyle,
-  normalizeEl,
+  normalizeSlide,
   placeImage,
+  restyle,
   uid,
 } from './lib/ink'
-import type { InkEl, ShapeKind, Story, StoryInk, Tool } from './types'
+import type { DrawStyle, InkEl, ShapeKind, Story, StoryInk, Tool } from './types'
 
 const HISTORY_LIMIT = 60
+
+/** Far enough that a duplicate reads as a copy and not as a mark that failed to move. */
+const DUPLICATE_OFFSET = 24
 
 /** A sticky toast stays until it is replaced — a save that failed has to be seen. */
 interface Toast {
@@ -117,7 +125,9 @@ export default function App() {
 
   const [tool, setTool] = useState<Tool>('cursor')
   const [shape, setShape] = useState<ShapeKind>(SHAPE_ORDER[0])
-  const [color, setColor] = useState<string>(INK_COLORS[0].value)
+  /** One current style rather than one current colour: every property the bar
+   *  edits is also the default the next mark is drawn with. */
+  const [style, setStyle] = useState<DrawStyle>(makeDrawStyle)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [focus, setFocus] = useState(false)
   const [idle, setIdle] = useState(false)
@@ -175,14 +185,10 @@ export default function App() {
     void fetchInk(activeSlug).then((data) => {
       if (cancelled) return
       // The one place on-disk shapes are read. Everything downstream — renderers,
-      // hit-tests, geometry — sees only the current shape, never a legacy fallback.
+      // hit-tests, geometry — sees only the current shape, never a legacy fallback,
+      // and an order that already means z-order.
       const loaded: StoryInk = Object.fromEntries(
-        Object.entries(data).map(([key, els]) => [
-          key,
-          (Array.isArray(els) ? els : [])
-            .map(normalizeEl)
-            .filter((el): el is InkEl => el !== null),
-        ]),
+        Object.entries(data).map(([key, els]) => [key, normalizeSlide(els)]),
       )
       setInk(loaded)
       setInkCounts((c) => ({
@@ -243,13 +249,23 @@ export default function App() {
 
   /* ------------------------------------------------------------ mutations */
 
+  /** Which continuous gesture the newest history entry belongs to, if any. The OS
+   *  colour panel streams an event a frame while it is dragged, and undo has to
+   *  step back over the whole pick rather than over each frame of it. */
+  const coalescing = useRef<string | null>(null)
+
   const mutate = useCallback(
-    (next: (prev: StoryInk) => StoryInk) => {
+    (next: (prev: StoryInk) => StoryInk, coalesce?: string) => {
       const prev = inkRef.current
       const updated = next(prev)
       dirty.current = true
       setInk(updated)
-      setPast([...pastRef.current.slice(-HISTORY_LIMIT), prev])
+      // Still the same gesture: extend the entry that is already on the stack
+      // instead of pushing another one beside it.
+      if (!coalesce || coalescing.current !== coalesce) {
+        setPast([...pastRef.current.slice(-HISTORY_LIMIT), prev])
+      }
+      coalescing.current = coalesce ?? null
       setFuture([])
       if (activeSlug) {
         setInkCounts((c) => ({
@@ -265,21 +281,29 @@ export default function App() {
      it moved one element or ten — the shape `erase` has always had. */
 
   const commitMany = useCallback(
-    (els: InkEl[]) => {
+    /** `behind` puts the new elements at the start of the slide — the array is the
+     *  z-order, and a pasted image belongs under the ink, not over it. */
+    (els: InkEl[], behind = false) => {
       if (!slide || !els.length) return
-      mutate((prev) => ({ ...prev, [slide.key]: [...(prev[slide.key] ?? []), ...els] }))
+      mutate((prev) => {
+        const current = prev[slide.key] ?? []
+        return { ...prev, [slide.key]: behind ? [...els, ...current] : [...current, ...els] }
+      })
     },
     [mutate, slide],
   )
 
   const updateMany = useCallback(
-    (els: InkEl[]) => {
+    (els: InkEl[], coalesce?: string) => {
       if (!slide || !els.length) return
       const next = new Map(els.map((el) => [el.id, el]))
-      mutate((prev) => ({
-        ...prev,
-        [slide.key]: (prev[slide.key] ?? []).map((el) => next.get(el.id) ?? el),
-      }))
+      mutate(
+        (prev) => ({
+          ...prev,
+          [slide.key]: (prev[slide.key] ?? []).map((el) => next.get(el.id) ?? el),
+        }),
+        coalesce,
+      )
     },
     [mutate, slide],
   )
@@ -323,10 +347,136 @@ export default function App() {
   // A selection can't outlive the slide it was made on.
   useEffect(clearSelection, [clearSelection, slide?.key, activeSlug, tool])
 
+  /* ------------------------------------------------------ selection editing */
+
+  /** The selected elements themselves — what the property bar reads its fields
+   *  from, and what an edit is written across. */
+  const selected = useMemo(
+    () => slideInk.filter((el) => selectedIds.includes(el.id)),
+    [slideInk, selectedIds],
+  )
+
+  /**
+   * Writes a property onto every selected element it applies to — one history
+   * entry however many it touched — and leaves the rest of the selection alone:
+   * a font size with a text and a shape selected is still a font size.
+   */
+  const editSelection = useCallback(
+    (edit: (el: InkEl) => InkEl | null, coalesce?: string) => {
+      const next = selected.map(edit).filter((el): el is InkEl => el !== null)
+      if (next.length) updateMany(next, coalesce)
+    },
+    [selected, updateMany],
+  )
+
+  /* Every property below does the same two things: write the selection, and make
+     the value the default the next mark is drawn with. */
+
+  const applyStroke = useCallback(
+    (stroke: string, coalesce?: string) => {
+      setStyle((s) => ({ ...s, stroke }))
+      editSelection((el) => restyle(el, { stroke }), coalesce)
+    },
+    [editSelection],
+  )
+
+  const applyFill = useCallback(
+    (fill: string | null, coalesce?: string) => {
+      setStyle((s) => ({ ...s, fill }))
+      // Only a closed shape has an interior; an arrow filled to its head, or a
+      // line with a fill it can't show, is nobody's idea of "fill".
+      editSelection(
+        (el) => (el.kind === 'shape' && el.shape !== 'line' ? restyle(el, { fill }) : null),
+        coalesce,
+      )
+    },
+    [editSelection],
+  )
+
+  /** ⊕ picked a colour: it becomes the remembered slot and the live value at once. */
+  const pickCustom = useCallback(
+    (c: string, target: 'stroke' | 'fill') => {
+      setStyle((s) => ({ ...s, custom: c }))
+      if (target === 'fill') applyFill(c, 'custom-fill')
+      else applyStroke(c, 'custom-stroke')
+    },
+    [applyFill, applyStroke],
+  )
+
+  const applyWidth = useCallback(
+    (widthScale: number) => {
+      setStyle((s) => ({ ...s, widthScale }))
+      editSelection((el) =>
+        el.kind === 'stroke' || el.kind === 'arrow' || el.kind === 'shape'
+          ? restyle(el, { strokeWidth: baseWidth(el) * widthScale })
+          : null,
+      )
+    },
+    [editSelection],
+  )
+
+  const applyOpacity = useCallback(
+    (opacity: number) => {
+      setStyle((s) => ({ ...s, opacity }))
+      editSelection((el) => restyle(el, { opacity }))
+    },
+    [editSelection],
+  )
+
+  const applyFontSize = useCallback(
+    (fontSize: number) => {
+      setStyle((s) => ({ ...s, fontSize }))
+      editSelection((el) => (el.kind === 'text' ? { ...el, fontSize } : null))
+    },
+    [editSelection],
+  )
+
+  /** Also arms the shape tool, so "actually, an oval" holds for the next one too. */
+  const applyShapeKind = useCallback(
+    (kind: ShapeKind) => {
+      setShape(kind)
+      editSelection((el) => (el.kind === 'shape' ? { ...el, shape: kind } : null))
+    },
+    [editSelection],
+  )
+
+  /** ⇧1-4 and the rail's swatches go through the same door as the property bar. */
+  const cycleColor = useCallback(() => {
+    const at = INK_COLORS.findIndex((c) => c.value === style.stroke)
+    applyStroke(INK_COLORS[(at + 1) % INK_COLORS.length].value)
+  }, [applyStroke, style.stroke])
+
+  /** Front and back move the selection to the end / start of the slide's array —
+   *  the array is the z-order. One history entry, however many marks moved. */
+  const reorderSelected = useCallback(
+    (toFront: boolean) => {
+      if (!slide || !selected.length) return
+      const chosen = new Set(selectedIds)
+      const rest = slideInk.filter((el) => !chosen.has(el.id))
+      mutate((prev) => ({
+        ...prev,
+        [slide.key]: toFront ? [...rest, ...selected] : [...selected, ...rest],
+      }))
+    },
+    [mutate, selected, selectedIds, slide, slideInk],
+  )
+
+  const duplicateSelected = useCallback(() => {
+    if (!selected.length) return
+    const copies = selected.map((el) => copyEl(el, DUPLICATE_OFFSET, DUPLICATE_OFFSET))
+    commitMany(copies)
+    // The copy is what you go on to move — leaving the original selected would
+    // mean every duplicate needs a click before it can be used.
+    setSelectedIds(copies.map((el) => el.id))
+  }, [commitMany, selected])
+
   const undo = useCallback(() => {
     const p = pastRef.current
     if (!p.length) return
     dirty.current = true
+    // Whatever gesture the top entry belonged to is over; a repeat of it must
+    // start a new entry rather than quietly extend the one just undone.
+    coalescing.current = null
     setFuture([inkRef.current, ...futureRef.current].slice(0, HISTORY_LIMIT))
     setInk(p[p.length - 1])
     setPast(p.slice(0, -1))
@@ -336,6 +486,7 @@ export default function App() {
     const f = futureRef.current
     if (!f.length) return
     dirty.current = true
+    coalescing.current = null
     setPast([...pastRef.current.slice(-HISTORY_LIMIT), inkRef.current])
     setInk(f[0])
     setFuture(f.slice(1))
@@ -400,7 +551,11 @@ export default function App() {
       try {
         const [src, natural] = await Promise.all([addImage(activeSlug, blob), measureImage(blob)])
         const nth = slideInk.filter((el) => el.kind === 'image').length
-        commit({ id: uid(), kind: 'image', src, style: makeStyle(), ...placeImage(natural, nth) })
+        // Behind everything: a paste must not hide the drawing it was pasted for.
+        commitMany(
+          [{ id: uid(), kind: 'image', src, style: makeStyle(), ...placeImage(natural, nth) }],
+          true,
+        )
         setToast({ text: src })
       } catch (err) {
         setToast({ text: err instanceof Error ? err.message : 'Could not add the image' })
@@ -408,7 +563,7 @@ export default function App() {
         adding.current = false
       }
     },
-    [activeSlug, slide, slideInk, commit],
+    [activeSlug, slide, slideInk, commitMany],
   )
 
   useEffect(() => {
@@ -479,7 +634,7 @@ export default function App() {
         const n = Number(digit) - 1
         if (e.shiftKey) {
           const c = INK_COLORS[n]
-          if (c) setColor(c.value)
+          if (c) applyStroke(c.value)
         } else {
           const t = TOOL_ORDER[n]
           if (t) pickTool(t)
@@ -533,15 +688,24 @@ export default function App() {
           setSidebarOpen((v) => (focus ? v : false))
           return setFocus((v) => !v)
         case 'c':
-          return setColor((current) => {
-            const at = INK_COLORS.findIndex((c) => c.value === current)
-            return INK_COLORS[(at + 1) % INK_COLORS.length].value
-          })
+          return cycleColor()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [clearSlide, deleteSelected, focus, go, pickTool, redo, selectAll, total, undo])
+  }, [
+    applyStroke,
+    clearSlide,
+    cycleColor,
+    deleteSelected,
+    focus,
+    go,
+    pickTool,
+    redo,
+    selectAll,
+    total,
+    undo,
+  ])
 
   /* ---------------------------------------------------------------- wheel */
 
@@ -664,7 +828,7 @@ export default function App() {
                   elements={slideInk}
                   tool={tool}
                   shape={shape}
-                  color={color}
+                  style={style}
                   selectedIds={selectedIds}
                   onSelect={setSelectedIds}
                   onCommit={commit}
@@ -674,11 +838,37 @@ export default function App() {
               )}
             </div>
 
-            {slide?.note && !focus && (
-              <p className="w-full text-[13.5px] leading-relaxed text-dim">
-                <span className="label mr-2 text-accent/70">note</span>
-                {slide.note}
-              </p>
+            {/* One reserved slot under the stage: the property bar while something
+                is selected, the speaker note otherwise. The height is fixed so the
+                stage never moves or resizes between the two — and both live outside
+                `.stage`, which is the recording crop. */}
+            {!focus && (
+              <div className="flex h-[66px] w-full shrink-0 items-start">
+                {selected.length > 0 ? (
+                  <PropertyBar
+                    elements={selected}
+                    custom={style.custom}
+                    onCustom={pickCustom}
+                    onStroke={applyStroke}
+                    onFill={applyFill}
+                    onWidth={applyWidth}
+                    onOpacity={applyOpacity}
+                    onFontSize={applyFontSize}
+                    onShapeKind={applyShapeKind}
+                    onFront={() => reorderSelected(true)}
+                    onBack={() => reorderSelected(false)}
+                    onDuplicate={duplicateSelected}
+                    onDelete={deleteSelected}
+                  />
+                ) : (
+                  slide?.note && (
+                    <p className="w-full text-[13.5px] leading-relaxed text-dim">
+                      <span className="label mr-2 text-accent/70">note</span>
+                      {slide.note}
+                    </p>
+                  )
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -687,13 +877,15 @@ export default function App() {
           <ToolRail
             tool={tool}
             shape={shape}
-            color={color}
+            color={style.stroke}
+            custom={style.custom}
             idle={idle && tool === 'cursor'}
             canUndo={past.length > 0}
             canRedo={future.length > 0}
             hasInk={slideInk.length > 0}
             onTool={pickTool}
-            onColor={setColor}
+            onColor={applyStroke}
+            onCustom={(c) => pickCustom(c, 'stroke')}
             onUndo={undo}
             onRedo={redo}
             onClear={clearSlide}

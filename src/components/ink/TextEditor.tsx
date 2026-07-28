@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { InkEl } from '../../types'
-import { TOOL_SIZE, makeStyle, textBox, uid } from '../../lib/ink'
+import type { DrawStyle, InkEl } from '../../types'
+import { makeStyle, textBox, uid } from '../../lib/ink'
 
 /** The open text box, before it becomes a `TextEl`. */
 export type TextDraft = { x: number; y: number; value: string }
 
 interface UseTextEditorArgs {
-  color: string
+  /** Sticky defaults — the colour, opacity and size the next text is set in. */
+  style: DrawStyle
   onCommit: (el: InkEl) => void
 }
 
@@ -15,7 +16,7 @@ interface UseTextEditorArgs {
  * value without working inside a setState updater — StrictMode invokes those
  * twice, which committed the same text element twice.
  */
-export function useTextEditor({ color, onCommit }: UseTextEditorArgs) {
+export function useTextEditor({ style, onCommit }: UseTextEditorArgs) {
   const [editing, setEditingState] = useState<TextDraft | null>(null)
   const editingRef = useRef<TextDraft | null>(null)
 
@@ -33,13 +34,13 @@ export function useTextEditor({ color, onCommit }: UseTextEditorArgs) {
     onCommit({
       id: uid(),
       kind: 'text',
-      style: makeStyle({ stroke: color }),
-      fontSize: TOOL_SIZE.text,
+      style: makeStyle({ stroke: style.stroke, opacity: style.opacity }),
+      fontSize: style.fontSize,
       x: current.x,
       y: current.y,
       text: current.value.replace(/\s+$/, ''),
     })
-  }, [color, onCommit, setEditing])
+  }, [style, onCommit, setEditing])
 
   /** Mirrors the textarea's `onChange` — guarded by the ref for the same reason
    *  `commitText` reads from it rather than from a closed-over `editing`. */

@@ -2,6 +2,7 @@ import { getStroke } from 'perfect-freehand'
 import type {
   ArrowEl,
   Box,
+  DrawStyle,
   ElStyle,
   ImageEl,
   InkEl,
@@ -45,6 +46,37 @@ export const TOOL_SIZE: Record<Exclude<Tool, 'cursor' | 'eraser'>, number> = {
   text: 54,
 }
 
+/**
+ * The three widths the property bar offers, as multiples of the drawing tool's
+ * own default rather than as pixels — see `DrawStyle.widthScale`. A resized
+ * element lands between steps, and none of them then claims it, which is the
+ * honest answer.
+ */
+export const WIDTH_STEPS = [
+  { name: 'Thin', scale: 0.5 },
+  { name: 'Regular', scale: 1 },
+  { name: 'Thick', scale: 2 },
+] as const
+
+/** The width an element counts as "regular" at — the tool that drew it. Only the
+ *  stroked kinds carry a meaningful one, and only they are ever asked. */
+export function baseWidth(el: InkEl): number {
+  if (el.kind === 'stroke') return TOOL_SIZE[el.brush]
+  if (el.kind === 'arrow') return TOOL_SIZE.arrow
+  return TOOL_SIZE.shape
+}
+
+/** Text sizes, in stage units. `TOOL_SIZE.text` is the middle one by definition. */
+export const FONT_STEPS = [
+  { name: 'S', size: 36 },
+  { name: 'M', size: TOOL_SIZE.text },
+  { name: 'L', size: 80 },
+  { name: 'XL', size: 116 },
+] as const
+
+/** Discrete stops, not a slider: on camera, "a bit dimmer" has to be repeatable. */
+export const OPACITY_STEPS = [1, 0.75, 0.5, 0.25] as const
+
 export const uid = () => Math.random().toString(36).slice(2, 10)
 
 /** Falls back to the colour a fresh session draws in, for data that names none. */
@@ -56,6 +88,28 @@ const DEFAULT_STROKE = INK_COLORS[0].value
  */
 export function makeStyle(patch: Partial<ElStyle> = {}): ElStyle {
   return { stroke: DEFAULT_STROKE, fill: null, strokeWidth: 0, opacity: 1, ...patch }
+}
+
+/** What a fresh session draws with, before any property has been touched. */
+export function makeDrawStyle(): DrawStyle {
+  return {
+    stroke: DEFAULT_STROKE,
+    fill: null,
+    widthScale: 1,
+    opacity: 1,
+    fontSize: TOOL_SIZE.text,
+    custom: null,
+  }
+}
+
+/** Restyle any element without narrowing its kind by hand at every call site. */
+export function restyle(el: InkEl, patch: Partial<ElStyle>): InkEl {
+  return { ...el, style: { ...el.style, ...patch } }
+}
+
+/** A copy at an offset, with a fresh identity — the one thing a duplicate can't share. */
+export function copyEl(el: InkEl, dx: number, dy: number): InkEl {
+  return { ...translateEl(el, dx, dy), id: uid() }
 }
 
 /**
@@ -579,4 +633,43 @@ export function normalizeEl(raw: unknown): InkEl | null {
     default:
       return null
   }
+}
+
+function imagesFirst(els: InkEl[]): InkEl[] {
+  const images = els.filter((el) => el.kind === 'image')
+  if (!images.length || images.length === els.length) return els
+  return [...images, ...els.filter((el) => el.kind !== 'image')]
+}
+
+/** A grouped `style` object is the marker of a row this code wrote. Anything
+ *  without one is flat-shaped and therefore predates array order meaning z-order. */
+function isLegacyRow(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object') return false
+  const style = (raw as Raw).style
+  return typeof style !== 'object' || style === null
+}
+
+/**
+ * A slide's elements as the app runs on them, and the second half of the load
+ * boundary: array position is z-order — the last element draws on top, which is
+ * what Front/Back move.
+ *
+ * Decks written before that was true leaned on the renderer force-sorting images
+ * behind the vector ink, so a drawing was never hidden by a paste. Those slides
+ * are partitioned on the way in, which reproduces exactly that appearance. A
+ * slide whose rows all carry a `style` object came from this code, so its order
+ * is a decision someone made and is trusted verbatim — partitioning it too would
+ * mean "bring this image to front" silently undid itself on the next reload.
+ */
+export function normalizeSlide(raw: unknown): InkEl[] {
+  const rows = Array.isArray(raw) ? raw : []
+  const els: InkEl[] = []
+  let legacy = false
+  for (const row of rows) {
+    const el = normalizeEl(row)
+    if (!el) continue
+    if (isLegacyRow(row)) legacy = true
+    els.push(el)
+  }
+  return legacy ? imagesFirst(els) : els
 }

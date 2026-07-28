@@ -130,5 +130,25 @@ export interface ImageEl {
 
 export type InkEl = StrokeEl | ArrowEl | ShapeEl | TextEl | ImageEl
 
-/** slide.key -> elements */
+/**
+ * The style the next mark is drawn with. Editing a property on a selection writes
+ * back here too, so "make it thinner" sticks for the mark after it as well.
+ */
+export interface DrawStyle {
+  stroke: string
+  /** Interior of the next closed shape; null draws it hollow. */
+  fill: string | null
+  /**
+   * Width as a multiple of each tool's own default, never an absolute size: 8px
+   * is a regular pen line and a hairline highlighter, so one number can't mean
+   * the same thing across nibs.
+   */
+  widthScale: number
+  opacity: number
+  fontSize: number
+  /** The one remembered custom colour, overwritten by the next ⊕ pick. */
+  custom: string | null
+}
+
+/** slide.key -> elements. Array order is z-order: the last element draws on top. */
 export type StoryInk = Record<string, InkEl[]>

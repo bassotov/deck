@@ -1,48 +1,28 @@
 import type { ShapeKind, Tool } from '../types'
-import { INK_COLORS, TOOL_ORDER } from '../lib/ink'
+import { TOOL_ORDER } from '../lib/ink'
+import ColorSwatches from './ColorSwatches'
+import { SHAPE_ICON, SHAPE_LABEL, icon } from './icons'
 
 interface Props {
   tool: Tool
   shape: ShapeKind
   color: string
+  /** The remembered custom colour — one slot, overwritten by the next ⊕ pick. */
+  custom: string | null
   idle: boolean
   canUndo: boolean
   canRedo: boolean
   hasInk: boolean
   onTool: (t: Tool) => void
   onColor: (c: string) => void
+  onCustom: (c: string) => void
   onUndo: () => void
   onRedo: () => void
   onClear: () => void
 }
 
-const icon = (d: string, extra?: React.ReactNode) => (
-  <svg viewBox="0 0 24 24" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-    <path d={d} />
-    {extra}
-  </svg>
-)
-
-/** Keyed by tool; the rail renders in TOOL_ORDER so the digits always match. */
-/** The shape button wears whatever shape it will draw next. */
-const SHAPE_ICON: Record<ShapeKind, React.ReactNode> = {
-  rect: icon('M4.5 5.5h15v13h-15z'),
-  ellipse: (
-    <svg viewBox="0 0 24 24" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth="1.6">
-      <ellipse cx="12" cy="12" rx="8.5" ry="7" />
-    </svg>
-  ),
-  triangle: icon('M12 4.5L20 19H4z'),
-  line: icon('M4.5 19.5L19.5 4.5'),
-}
-
-const SHAPE_LABEL: Record<ShapeKind, string> = {
-  rect: 'Square',
-  ellipse: 'Oval',
-  triangle: 'Triangle',
-  line: 'Line',
-}
-
+/** Keyed by tool; the rail renders in TOOL_ORDER so the digits always match.
+ *  The shape button wears whatever shape it will draw next. */
 const TOOL_META: Record<Tool, { alias: string; label: string; svg: React.ReactNode }> = {
   cursor: { alias: 'V', label: 'Select & move', svg: icon('M5 3l6.5 16 2.2-6.4L20 10.5z') },
   pen: { alias: 'P', label: 'Pen', svg: icon('M4 20l4.5-1.2L20 7.3a2 2 0 0 0-2.8-2.8L5.7 15.9z') },
@@ -96,12 +76,14 @@ export default function ToolRail({
   tool,
   shape,
   color,
+  custom,
   idle,
   canUndo,
   canRedo,
   hasInk,
   onTool,
   onColor,
+  onCustom,
   onUndo,
   onRedo,
   onClear,
@@ -140,21 +122,16 @@ export default function ToolRail({
 
       <div className="my-1 h-px w-6 bg-white/10" />
 
-      <div className="flex flex-col items-center gap-1.5 py-1">
-        {INK_COLORS.map((c, i) => (
-          <button
-            key={c.value}
-            title={`${c.name}  ·  ⇧${i + 1}  ·  C cycles`}
-            onClick={() => onColor(c.value)}
-            className={`size-4 rounded-full transition-transform ${
-              color === c.value
-                ? 'scale-100 ring-2 ring-white/70 ring-offset-2 ring-offset-[#141312]'
-                : 'scale-90 hover:scale-100'
-            }`}
-            style={{ background: c.value }}
-          />
-        ))}
-      </div>
+      {/* Same swatch row the property bar draws, stacked — one implementation, so
+          a colour picked in either place reads identically. */}
+      <ColorSwatches
+        value={color}
+        onChange={(c) => c && onColor(c)}
+        custom={custom}
+        onCustom={onCustom}
+        vertical
+        shortcuts
+      />
 
       <div className="my-1 h-px w-6 bg-white/10" />
 

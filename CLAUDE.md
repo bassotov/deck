@@ -117,6 +117,26 @@ way; there is no text wrapping in this format, so nothing else could sensibly me
 the element's own area, so a small mark stays draggable rather than fenced in by its
 own handles. No rotation: marks are drawn at their final angle in one gesture.
 
+A selection also opens a **property bar under the stage**, in the slot the speaker note
+otherwise holds — never over the slide, which is the recording crop. It shows only what
+the selection can carry: colour always, fill on closed shapes, width on anything
+stroked, opacity always, font size on text, and the shape kind, so a square can become
+an oval after it was drawn. A multi-selection whose members disagree shows nothing
+active rather than the first element's value, and an edit still writes to all of them as
+one undo entry. Whatever is set there is also what the next mark is drawn with.
+
+The four colours stay four. `⊕` opens the native OS colour panel — which is where the
+macOS eyedropper lives — and what it returns is remembered as one extra swatch until the
+next custom pick replaces it.
+
+Array order is z-order, so Front and Back move the selection to the end or the start of
+the slide's array. The renderer no longer re-sorts images behind the ink every frame —
+that would make the control a lie — so two things keep old decks looking as they did: a
+paste is inserted at the start, and a slide still holding **legacy** rows (flat
+`color`/`size`, no `style` object) is partitioned images-first once on load. A slide
+whose rows all carry a `style` was written by this code, so its order is trusted
+verbatim. One save is all it takes for front/back to stick forever.
+
 `⇧1–4` colour · `C` cycles colour · Shift while drawing snaps to a straight line
 `←/→`, space, scroll — navigate · `⌘Z`/`⇧⌘Z` undo/redo · `X` clear slide
 `⌘B` sidebar · `F` focus mode · `Esc` out

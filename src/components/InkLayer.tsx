@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import type { InkEl, ShapeKind, Tool } from '../types'
+import type { DrawStyle, InkEl, ShapeKind, Tool } from '../types'
 import {
   STAGE_H,
   STAGE_W,
@@ -22,7 +22,8 @@ interface Props {
   elements: InkEl[]
   tool: Tool
   shape: ShapeKind
-  color: string
+  /** What the next mark is drawn with — colours, width, opacity, text size. */
+  style: DrawStyle
   selectedIds: string[]
   onSelect: (ids: string[]) => void
   onCommit: (el: InkEl) => void
@@ -36,7 +37,7 @@ export default function InkLayer({
   elements,
   tool,
   shape,
-  color,
+  style,
   selectedIds,
   onSelect,
   onCommit,
@@ -59,7 +60,7 @@ export default function InkLayer({
   /** Stage units -> CSS pixels, for sizing the live text input. */
   const pxPerUnit = () => (wrapRef.current?.clientWidth ?? STAGE_W) / STAGE_W
 
-  const { editing, setEditing, commitText, updateValue } = useTextEditor({ color, onCommit })
+  const { editing, setEditing, commitText, updateValue } = useTextEditor({ style, onCommit })
 
   // Switching tool or slide shouldn't strand an open text box.
   useEffect(() => {
@@ -72,7 +73,7 @@ export default function InkLayer({
       elements,
       tool,
       shape,
-      color,
+      style,
       toStage,
       onCommit,
       onErase,
@@ -102,15 +103,16 @@ export default function InkLayer({
     toStage,
   })
 
-  /** Images sit behind the vector ink, so a drawing is never hidden by a paste. */
-  const ordered = useMemo(
-    () => [...elements].sort((a, b) => Number(a.kind !== 'image') - Number(b.kind !== 'image')),
-    [elements],
-  )
-
+  /**
+   * Plain array order — position *is* z-order, which is what Front/Back move.
+   * Images still land behind the vector ink because they are inserted at the
+   * front of the array on paste, and because a legacy slide is partitioned once
+   * on the way in (see `normalizeSlide`) — not because the renderer re-sorts them
+   * every frame, which would make any z-order control a lie.
+   */
   const committed = useMemo(
     () =>
-      ordered.map((el) => {
+      elements.map((el) => {
         const moving =
           interaction.mode === 'dragging' && interaction.ids.includes(el.id) ? interaction : null
         // A live resize renders scaled but still drives off the committed
@@ -135,7 +137,7 @@ export default function InkLayer({
         )
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ordered, selecting, selectedIds, interaction],
+    [elements, selecting, selectedIds, interaction],
   )
 
   const scale = pxPerUnit()
@@ -201,16 +203,19 @@ export default function InkLayer({
             className={brush === 'highlighter' ? 'ink-highlight' : undefined}
           />
         )}
+        {/* The preview draws with the same style the commit will use, so what a
+            drag shows is what lands. */}
         {dragTo && tool === 'arrow' && (
           <path
             d={arrowToPath({
               from: start.current,
               to: dragTo,
-              style: makeStyle({ strokeWidth: TOOL_SIZE.arrow }),
+              style: makeStyle({ strokeWidth: TOOL_SIZE.arrow * style.widthScale }),
             })}
             fill="none"
-            stroke={color}
-            strokeWidth={TOOL_SIZE.arrow}
+            stroke={style.stroke}
+            strokeWidth={TOOL_SIZE.arrow * style.widthScale}
+            opacity={style.opacity}
             strokeLinecap="round"
             strokeLinejoin="round"
           />
@@ -218,9 +223,10 @@ export default function InkLayer({
         {dragTo && tool === 'shape' && (
           <path
             d={shapeToPath({ shape, from: start.current, to: dragTo })}
-            fill="none"
-            stroke={color}
-            strokeWidth={TOOL_SIZE.shape}
+            fill={(shape !== 'line' && style.fill) || 'none'}
+            stroke={style.stroke}
+            strokeWidth={TOOL_SIZE.shape * style.widthScale}
+            opacity={style.opacity}
             strokeLinecap="round"
             strokeLinejoin="round"
           />
@@ -230,8 +236,8 @@ export default function InkLayer({
       {editing && (
         <TextEditor
           draft={editing}
-          color={color}
-          fontSize={TOOL_SIZE.text}
+          color={style.stroke}
+          fontSize={style.fontSize}
           scale={scale}
           onChange={updateValue}
           onCommit={commitText}

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import type { InkEl, ShapeKind, Tool } from '../types'
+import type { DrawStyle, InkEl, ShapeKind, Tool } from '../types'
 import { TOOL_SIZE, hitsElement, makeStyle, snapAngle, squareOff, uid } from '../lib/ink'
 import type { TextDraft } from '../components/ink/TextEditor'
 
@@ -9,7 +9,8 @@ interface Args {
   elements: InkEl[]
   tool: Tool
   shape: ShapeKind
-  color: string
+  /** Sticky defaults: whatever was last set, on the rail or the property bar. */
+  style: DrawStyle
   toStage: (clientX: number, clientY: number) => [number, number]
   onCommit: (el: InkEl) => void
   onErase: (ids: string[]) => void
@@ -24,7 +25,7 @@ export function useInkDrawing({
   elements,
   tool,
   shape,
-  color,
+  style,
   toStage,
   onCommit,
   onErase,
@@ -41,12 +42,13 @@ export function useInkDrawing({
   const active = tool !== 'cursor'
 
   /** The nib a freehand stroke draws with, and the style it commits with. The
-   *  highlighter's dimming belongs to the nib — nothing reads it back the other way. */
+   *  highlighter's dimming belongs to the nib — nothing reads it back the other
+   *  way, and no chosen opacity overrides it, or the nib stops being a nib. */
   const brush: 'pen' | 'highlighter' = tool === 'highlighter' ? 'highlighter' : 'pen'
   const brushStyle = makeStyle({
-    stroke: color,
-    strokeWidth: TOOL_SIZE[brush],
-    opacity: brush === 'highlighter' ? 0.32 : 1,
+    stroke: style.stroke,
+    strokeWidth: TOOL_SIZE[brush] * style.widthScale,
+    opacity: brush === 'highlighter' ? 0.32 : style.opacity,
   })
 
   const erase = useCallback(
@@ -130,7 +132,11 @@ export function useInkDrawing({
             ? {
                 id: uid(),
                 kind: 'arrow',
-                style: makeStyle({ stroke: color, strokeWidth: TOOL_SIZE.arrow }),
+                style: makeStyle({
+                  stroke: style.stroke,
+                  strokeWidth: TOOL_SIZE.arrow * style.widthScale,
+                  opacity: style.opacity,
+                }),
                 from: start.current,
                 to: dragTo,
               }
@@ -138,7 +144,14 @@ export function useInkDrawing({
                 id: uid(),
                 kind: 'shape',
                 shape,
-                style: makeStyle({ stroke: color, strokeWidth: TOOL_SIZE.shape }),
+                style: makeStyle({
+                  stroke: style.stroke,
+                  // A line has no interior; carrying a fill it can't show would
+                  // only surprise the next person to open the JSON.
+                  fill: shape === 'line' ? null : style.fill,
+                  strokeWidth: TOOL_SIZE.shape * style.widthScale,
+                  opacity: style.opacity,
+                }),
                 from: start.current,
                 to: dragTo,
               },
