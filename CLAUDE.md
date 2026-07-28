@@ -34,7 +34,9 @@ Annotations go in a dot-folder so Obsidian ignores them.
 
 One file = one deck. Slides split by `---` alone on a line. Slide 1 is the title slide.
 
-- `<!-- layout: title|center|quote|columns|default -->` — override the auto-detected layout
+- `<!-- layout: … -->` — override the auto-detected layout. The full set is in `LAYOUTS`
+  in `types.ts`: `title`, `center`, `quote`, `columns`, `flow`, `stats`, `versus`,
+  `timeline`, `image`, `default`
 - `<!-- note: … -->` — speaker note; renders **under** the stage, outside the recording crop
 - `<span class="eyebrow">day 42</span>` — mono label, put it **above** the heading
 - `<span class="hand">like this</span>` — the Caveat handwritten accent
@@ -83,8 +85,30 @@ Tuned for a **trackpad**, not a stylus: `simulatePressure` derives width from ve
 straight 15°-incremented line. The eraser deletes whole strokes rather than chewing
 pixel holes — it reads far cleaner on camera.
 
-Adding a tool means touching `lib/ink.ts` (geometry), `InkLayer.tsx` (pointer handling)
-and `ToolRail.tsx` (the button).
+Every element carries one `style` object — `{ stroke, fill, strokeWidth, opacity }` — plus
+its own geometry, and text carries a top-level `fontSize`. One shape for all five kinds is
+what lets the property bar read and write any of them without per-kind field mapping. A
+stroke also stores the `brush` it was drawn with: the highlighter used to be inferred from
+`opacity < 1`, which would have turned any dimmed pen stroke into a highlighter the moment
+opacity became editable.
+
+Decks on disk predate that model. `normalizeSlide` in `lib/ink.ts` is the one load
+boundary that converts flat legacy rows (`color`/`size`) into the current shape, so no
+renderer or hit-tester carries a fallback. Nothing rewrites the vault — a slide upgrades
+the next time it is saved.
+
+`InkLayer.tsx` is the orchestrator; the parts live beside it. `ink/ElementView.tsx` renders
+one element plus its fat hit area, `ink/SelectionOverlay.tsx` draws outlines, grips and the
+marquee, `ink/TextEditor.tsx` owns the floating textarea, `hooks/useInkDrawing.ts` authors
+new elements and `hooks/useSelectionInteraction.ts` manipulates existing ones through a
+single `Interaction` union, so its modes can't overlap. Adding a tool means `lib/ink.ts`
+(geometry), `useInkDrawing.ts` (pointer handling) and `ToolRail.tsx` (the button).
+
+Live gesture state stays local until pointer-up, and the commit goes through `updateMany`.
+That is what makes a drag or a resize of ten elements one undo entry instead of ten.
+Nothing may call `setState` from inside another `setState` updater: the app only ever runs
+under `npm run dev`, so StrictMode's double-invoke is permanent, and side effects in an
+updater duplicated committed text and made one undo walk back two steps.
 
 **Annotations key off the slide's heading**, not its position (`h:speaker-notes`, with
 `s<index>` as the fallback for headless slides). Keying by position meant inserting a
@@ -102,12 +126,41 @@ oval → triangle → line. The button always wears the shape it will draw next.
 
 `6` then click opens a text box at that point, set in the Caveat accent face so typed
 annotation reads as annotation. `Esc` or `⌘↵` commits, clicking away commits.
+**Double-click a committed text with the cursor tool to edit it** — same textarea, seeded
+from the element, written back to the same id. Clearing it deletes the mark, since empty
+text is invisible and would strand something unselectable. Double-click is decided on
+pointer-*up*, gated on the drag threshold: on pointer-down, "click to select then drag
+from the same point" reads as a double-click and opens a textarea that steals the focus.
 
-`1` is select-and-move: drawn elements re-enable pointer events so they can be dragged
-to realign, while clicks on empty slide pass straight through. Shift constrains a drag
-to one axis. Each element carries an invisible fatter hit area so a 7px line is still
-grabbable on a trackpad; closed shapes hit-test on their outline only, so a rectangle
-drawn around content doesn't swallow clicks meant for the slide.
+`1` is select-and-move. Click selects, **Shift-click adds or removes**, and dragging on
+empty canvas draws a **marquee** that takes everything it intersects — intersection, not
+enclosure, which is far more forgiving on a trackpad. `⌘A` takes the whole slide. Dragging
+any member moves the whole selection as one undo entry; **Option-drag leaves the originals
+and drags copies**. Shift constrains a drag to one axis, and because Shift also means
+add-to-selection, the membership toggle is deferred to pointer-up and only applied if the
+pointer never travelled far enough to count as a drag.
+
+Each element carries an invisible fatter hit area so a 7px line is still grabbable on a
+trackpad; closed shapes hit-test on their outline only, so a rectangle drawn around content
+doesn't swallow clicks meant for the slide. The marquee needs pointer events on empty
+canvas, which cursor mode used to pass through to the slide, so a transparent backdrop now
+sits behind every element in that mode only — slide HTML is not directly clickable while
+the cursor tool is active, which does not matter for a deck being annotated rather than
+read.
+
+`⌘C`/`⌘V` copy and paste, `⌘D` duplicates. The clipboard is an in-memory ref in `App` — not
+the OS clipboard, since pasting a mark into another app is not a real use, and `InkLayer`
+is remounted per slide so a clipboard living there could never survive the slide change
+that cross-slide paste exists for. Real `⌘V` is handled **only** in the existing window
+`paste` listener (images first, elements as the fallback) so it cannot fire twice. Pasting
+onto the slide the copy came from cascades an offset; pasting onto another slide keeps the
+original coordinates, because putting the same mark in the same place is the point.
+
+Nothing can be dragged, nudged or pasted entirely off the stage — it clips overflow, so an
+escaped mark left nothing to click and looked deleted. A gesture also latches its tool at
+pointer-down, and tool and navigation keys are ignored while one is in flight: pointer
+capture keeps delivering events, so a keyboard tool switch mid-stroke used to reinterpret
+a pen stroke as an eraser drag or drop it silently.
 
 A selection — one element or ten — wears eight resize grips: four corners (both axes)
 and four edge midpoints (one axis). Shift locks the aspect, Option resizes from the
@@ -138,10 +191,20 @@ whose rows all carry a `style` was written by this code, so its order is trusted
 verbatim. One save is all it takes for front/back to stick forever.
 
 `⇧1–4` colour · `C` cycles colour · Shift while drawing snaps to a straight line
+`⌘A` select all · `⌘C`/`⌘V`/`⌘D` copy/paste/duplicate · `⌫` delete the selection
 `⌘]`/`⌘[` front/back · `⌘Z`/`⇧⌘Z` undo/redo · `X` clear slide
 `⌘B` sidebar · `F` focus mode · `Esc` out — clears a selection, then the tool, then focus, one step per press
 
+**Arrows nudge whatever is selected** (4 stage units, 20 with Shift) and only navigate
+slides when nothing is selected. `space`, `j` and `k` navigate **always** — that is the
+escape hatch mid-recording, so advancing a slide never depends on remembering to press
+`Esc` first. Scroll navigates too.
+
 Digits are read off `e.code`, not `e.key` — Shift+1 arrives as `!` on a Mac layout.
+
+The property bar's slot under the stage is always reserved, so the stage never resizes
+when a selection appears. A stage that changes size mid-recording is far worse than a
+strip of empty space.
 
 Arrows nudge the selection when one exists (4 stage units, Shift = 20) and navigate
 the slide only when nothing is selected. `space`, `j`, `k` and scroll always navigate
