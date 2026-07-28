@@ -701,8 +701,9 @@ export default function App() {
 
   /**
    * Paste or drop an image and it lands on the slide you are looking at. The
-   * markdown in the vault is what changes — the deck reloads from that, so the
-   * paste is durable and editable in Obsidian like anything else.
+   * bytes are written to the images folder and the placement is stored as an
+   * ink element, so the storyline's markdown is never touched — a screenshot
+   * laid over a slide behaves like a drawing, not like content.
    */
   // One drop can arrive as several events. Without this, a single drag wrote
   // the same screenshot two or three times.
