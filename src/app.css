@@ -706,6 +706,10 @@ body {
   color: var(--color-accent);
   font-size: 1.25em;
   line-height: 1;
+  /* Caveat's terminal letters carry a swash that overhangs its advance width,
+     so the next word collides with it — "deck works" reads as "deckworks" at
+     display size. In em, so the correction scales with the accent. */
+  margin-right: 0.12em;
 }
 
 /* An eyebrow above a heading — `<span class="eyebrow">day 42</span>` */
