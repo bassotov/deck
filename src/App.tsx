@@ -819,10 +819,35 @@ export default function App() {
     }
   }, [])
 
+  /**
+   * The shortcut handler is re-created every render — it closes over the tool,
+   * the selection and the slide count. It is held in a ref and dispatched to by
+   * ONE listener registered on mount, rather than being re-subscribed.
+   *
+   * Re-subscribing looked harmless and silently ate keys. A key that arrives
+   * while the chrome is idle runs the `wake` listener below first, which sets
+   * state; React flushes that synchronously for a discrete event, the effect
+   * re-runs mid-dispatch, and the DOM never calls a listener removed during
+   * dispatch — nor one added during it. So the first press after every idle
+   * pause did nothing but wake the rail, and only the second one navigated.
+   */
+  const latestKeyHandler = useRef<(e: KeyboardEvent) => void>(() => {})
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => latestKeyHandler.current(e)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
+        // The one exception: Escape leaves a text field the user is stuck in,
+        // e.g. the sidebar filter, which otherwise swallows every shortcut.
+        if (e.key === 'Escape') el.blur()
+        return
+      }
 
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault()
@@ -955,30 +980,8 @@ export default function App() {
           return cycleColor()
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [
-    applyStroke,
-    clearSelection,
-    clearSlide,
-    copySelection,
-    cycleColor,
-    deleteSelected,
-    duplicateSelected,
-    enterFocus,
-    exitFocus,
-    focus,
-    go,
-    nudgeSelected,
-    pickTool,
-    redo,
-    reorderSelected,
-    selectAll,
-    selected,
-    tool,
-    total,
-    undo,
-  ])
+    latestKeyHandler.current = onKey
+  })
 
   /* ---------------------------------------------------------------- wheel */
 
