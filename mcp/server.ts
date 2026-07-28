@@ -33,14 +33,23 @@ function outline(slug: string, raw: string): Outline {
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
-export function createDeckMcpServer(config: DeckConfig): McpServer {
+/**
+ * The viewer `open_deck` starts, held outside the server instance so whoever
+ * owns the process can shut it down. It is an HTTP server: left running it
+ * keeps the event loop alive and the process never exits.
+ */
+export interface ViewerHandle {
+  running: RunningServer | null
+}
+
+export function createDeckMcpServer(
+  config: DeckConfig,
+  viewer: ViewerHandle = { running: null },
+): McpServer {
   const store = createStore(config)
   // Read, never hardcoded: a version literal here silently drifts from the
   // package the client actually installed.
   const server = new McpServer({ name: 'deck', version: readPackageVersion() })
-
-  /** One viewer per MCP process — a second open_deck returns the first one's URL. */
-  const viewer: { running: RunningServer | null } = { running: null }
 
   server.registerTool(
     'deck_syntax',
@@ -225,7 +234,8 @@ export function createDeckMcpServer(config: DeckConfig): McpServer {
  */
 export async function startMcpServer(config: DeckConfig): Promise<void> {
   console.error(`deck MCP server on stdio — decks: ${config.decksDir}`)
-  const handle = serveStdio(() => createDeckMcpServer(config))
+  const viewer: ViewerHandle = { running: null }
+  const handle = serveStdio(() => createDeckMcpServer(config, viewer))
 
   await new Promise<void>((resolve) => {
     process.stdin.on('close', () => resolve())
@@ -233,5 +243,17 @@ export async function startMcpServer(config: DeckConfig): Promise<void> {
     process.on('SIGINT', () => resolve())
     process.on('SIGTERM', () => resolve())
   })
-  await handle.close()
+
+  await handle.close().catch(() => {})
+  // A viewer opened during the session would otherwise outlive the connection:
+  // its listening socket holds the event loop open and the host is left waiting
+  // on a process that has already stopped answering.
+  await viewer.running?.close().catch(() => {})
+
+  // Exit rather than falling off the end. Shutdown can land while a tool call
+  // is still in flight, and an `open_deck` that starts a moment later would
+  // bind a socket nothing is left to close — so the process must not depend on
+  // the handle count reaching zero on its own. stdin has already ended here,
+  // which means the client is gone and there is no reply left worth writing.
+  process.exit(0)
 }

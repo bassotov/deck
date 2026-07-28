@@ -62,8 +62,15 @@ export function resolveConfig({
   cwd = process.cwd(),
 }: ResolveConfigOptions = {}): DeckConfig {
   const fileEnv = readEnvFiles(cwd)
+  /**
+   * Empty is unset, and so is an unsubstituted `${user_config.…}`: a desktop
+   * extension passes its optional fields through verbatim when the user leaves
+   * them blank, and resolving that would create a directory with a literal
+   * `${` in its name rather than falling back.
+   */
+  const usable = (v: string | undefined): boolean => Boolean(v && !v.includes('${'))
   const env = (...names: string[]): string | undefined =>
-    names.map((n) => process.env[n] ?? fileEnv[n]).find((v) => v)
+    names.map((n) => process.env[n] ?? fileEnv[n]).find(usable)
 
   const decks = resolveDir(decksDir ?? env('DECKS_DIR', 'STORIES_DIR') ?? 'decks')
 
