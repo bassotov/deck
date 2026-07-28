@@ -8,5 +8,9 @@ dist
 .env.local
 .env.*.local
 
-# Annotations on the bundled example decks — scratch, not source
-decks/.ink/
+# Whatever `npm run export` writes
+exports/
+
+# Pasted screenshots on the example decks. The committed annotations in
+# decks/.ink/ are deliberate — they demo the ink layer on a first run.
+decks/images/

@@ -25,7 +25,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "export": "node scripts/export.mjs"
   },
   "dependencies": {
     "marked": "^18.0.7",
