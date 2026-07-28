@@ -15,3 +15,6 @@ exports/
 # decks/.ink/ are deliberate — they demo the ink layer on a first run.
 decks/images/
 lib/
+
+# Extension bundle staging and output
+build/

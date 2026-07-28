@@ -1,0 +1,109 @@
+<!doctype html>
+<!--
+  Source of truth for the extension icon. `npm run bundle` re-renders it to
+  icon.png at 512×512 when Playwright is available, so the mark is edited here
+  rather than in a binary.
+
+  The product in one glyph: a slide, and a coral mark drawn over it.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 512px; height: 512px; }
+      body {
+        display: grid;
+        place-items: center;
+        background: #17161a;
+      }
+      .icon {
+        position: relative;
+        width: 512px;
+        height: 512px;
+        display: grid;
+        place-items: center;
+        background: radial-gradient(120% 120% at 30% 20%, #23212a 0%, #17161a 62%);
+      }
+      /* The slide: 16:9, warm near-white, the same stage the app renders. */
+      .slide {
+        position: relative;
+        width: 384px;
+        height: 216px;
+        border-radius: 18px;
+        background: #fbf9f6;
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 2px 0 rgba(255, 255, 255, 0.06) inset;
+      }
+      /* A title and two body lines, suggested rather than drawn. */
+      .title {
+        position: absolute;
+        left: 34px;
+        top: 40px;
+        font-family: 'Instrument Serif', serif;
+        font-size: 46px;
+        line-height: 1;
+        color: #17161a;
+      }
+      .rule {
+        position: absolute;
+        left: 34px;
+        height: 9px;
+        border-radius: 5px;
+        background: #17161a;
+        opacity: 0.16;
+      }
+      .rule.a { top: 116px; width: 150px; }
+      .rule.b { top: 142px; width: 108px; }
+      /* The figure the mark is drawn around — a slide always rings something. */
+      .figure {
+        position: absolute;
+        right: 46px;
+        top: 74px;
+        font-family: 'Instrument Serif', serif;
+        font-size: 64px;
+        line-height: 1;
+        color: #ff5a1f;
+      }
+      /* The mark. Drawn over the slide, never part of it. */
+      .ink {
+        position: absolute;
+        inset: 0;
+        overflow: visible;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="icon">
+      <div class="slide">
+        <div class="title">deck</div>
+        <div class="rule a"></div>
+        <div class="rule b"></div>
+        <div class="figure">25%</div>
+
+        <svg class="ink" viewBox="0 0 384 216" fill="none">
+          <!-- circled, the way you ring the number that matters -->
+          <ellipse
+            cx="292" cy="106" rx="72" ry="46"
+            stroke="#FF5A1F" stroke-width="11" stroke-linecap="round"
+            transform="rotate(-7 292 106)"
+          />
+          <!-- and an arrow pointing at it, clear of the text -->
+          <path
+            d="M104 190 L206 143"
+            stroke="#FF5A1F" stroke-width="11" stroke-linecap="round"
+          />
+          <path
+            d="M206 143 L179 145 M206 143 L193 165"
+            stroke="#FF5A1F" stroke-width="11" stroke-linecap="round"
+          />
+        </svg>
+      </div>
+    </div>
+  </body>
+</html>
