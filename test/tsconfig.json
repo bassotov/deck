@@ -1,0 +1,15 @@
+{
+  /* Tests reach into both builds — `server/` (NodeNext, `.ts` specifiers) and
+     `src/lib/ink.ts` (a bundler-style project with extensionless imports) — so
+     they get a resolution mode that accepts both, and are only ever checked,
+     never emitted: `lib/` is published and tests are not. */
+  "extends": "../tsconfig.node.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "rewriteRelativeImportExtensions": false,
+    "rootDir": ".."
+  },
+  "include": ["."]
+}

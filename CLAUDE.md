@@ -10,7 +10,8 @@ this file is the working reference for the internals.
 npm run dev            # vite, http://localhost:5290 — the app-development loop
 npm start              # build, then the CLI, serving the built app
 npm run mcp            # build, then the MCP server on stdio
-npm run typecheck      # both projects
+npm run typecheck      # client, node, and the tests
+npm test               # the unit tests, no build needed
 ```
 
 ## Shape
@@ -82,6 +83,24 @@ typecheck and build, so a stale `dist/` cannot be published by accident.
 `files` must keep carrying `PRIVACY.md`, `SECURITY.md` and `THIRD-PARTY-LICENSES.md`.
 The tarball ships the bundled woff2 files, and the OFL requires their notices to travel
 with them.
+
+## Tests
+
+`npm test` runs `test/*.test.ts` with Node's built-in runner and its type stripping — no
+test framework, no build step, Node 22.6+ (the package itself still supports 20.19). CI
+runs typecheck, build and test on every push and pull request.
+
+What is covered is what has no browser in it: the slide grammar (`server/slides.ts`),
+config resolution, the store's security rules (slug validation, `..` refusal, no
+clobbering, the asset-root boundary) and the ink geometry and load boundary
+(`src/lib/ink.ts`). Each test pins a rule or a past bug named in this file, so a failing
+one means a decision is being undone — read the comment above the code before "fixing"
+the test. Component, hook and export behaviour is still checked by hand.
+
+Tests import `src/lib/ink.ts` directly, which only works while that file imports nothing
+but types and `perfect-freehand`. Keep the pure geometry free of React and the DOM.
+`test/tsconfig.json` type-checks them under bundler resolution (the two builds disagree
+about extensions) and never emits: `lib/` is published and tests are not.
 
 ## The two builds
 
